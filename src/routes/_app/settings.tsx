@@ -36,7 +36,7 @@ function SettingsPage() {
         <Field label="Teléfono"><Input value={form.businessPhone} onChange={(e) => setForm({ ...form, businessPhone: e.target.value })} /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Tasa de impuesto (%)"><Input type="number" step="0.001" value={form.taxRate} onChange={(e) => setForm({ ...form, taxRate: +e.target.value })} /></Field>
-          <Field label="Código de moneda"><Input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} placeholder="MXN" /></Field>
+          <Field label="Código de moneda"><Input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} placeholder="DOP" /></Field>
         </div>
         <div className="flex gap-2 pt-2">
           <Button onClick={save}>Guardar ajustes</Button>
