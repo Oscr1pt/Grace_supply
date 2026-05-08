@@ -59,7 +59,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lustre — Jewelry Sales Suite" },
+      { title: "IMPERIO GOLD JOYERIA — Sistema de Ventas" },
       { name: "description", content: "Manage clients, inventory, sales and purchases for your jewelry business." },
     ],
     links: [{ rel: "stylesheet", href: appCss }],
