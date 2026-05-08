@@ -2,11 +2,11 @@ import { useLocalStore } from "./storage";
 import type { Settings } from "./types";
 
 export const defaultSettings: Settings = {
-  businessName: "Lustre Fine Jewelry",
-  businessAddress: "123 Diamond Ave, New York, NY",
-  businessPhone: "+1 (555) 010-2024",
-  taxRate: 8.875,
-  currency: "USD",
+  businessName: "Lustre Joyería Fina",
+  businessAddress: "Av. de los Diamantes 123, Ciudad",
+  businessPhone: "+52 (55) 0102-2024",
+  taxRate: 16,
+  currency: "MXN",
 };
 
 export function useSettings() {

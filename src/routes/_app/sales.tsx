@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useLocalStore, uid, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { Sale, SaleLine, Client, InventoryItem } from "@/lib/types";
@@ -40,7 +40,7 @@ function SalesPage() {
   const addLine = () => {
     const item = inventory.find((i) => i.id === pickItem);
     if (!item) return;
-    if (item.quantity < 1) { toast.error("Out of stock"); return; }
+    if (item.quantity < 1) { toast.error("Sin existencia"); return; }
     const existing = lines.find((l) => l.itemId === item.id);
     if (existing) {
       setLines(lines.map((l) => l.itemId === item.id ? { ...l, quantity: l.quantity + 1 } : l));
@@ -56,9 +56,8 @@ function SalesPage() {
   const reset = () => { setClientId(""); setLines([]); setPickItem(""); };
 
   const save = () => {
-    if (!clientId) { toast.error("Select a client"); return; }
-    if (lines.length === 0) { toast.error("Add at least one item"); return; }
-    // decrement inventory
+    if (!clientId) { toast.error("Selecciona un cliente"); return; }
+    if (lines.length === 0) { toast.error("Agrega al menos una pieza"); return; }
     const newInv = inventory.map((it) => {
       const ln = lines.find((l) => l.itemId === it.id);
       return ln ? { ...it, quantity: Math.max(0, it.quantity - ln.quantity) } : it;
@@ -71,14 +70,14 @@ function SalesPage() {
       createdAt: new Date().toISOString(),
     };
     setSales([sale, ...sales]);
-    toast.success("Sale recorded");
+    toast.success("Venta registrada");
     setOpen(false);
     reset();
     setViewing(sale);
   };
 
   const remove = (id: string) => {
-    if (!confirm("Delete this sale? Inventory won't be restored.")) return;
+    if (!confirm("¿Eliminar esta venta? El inventario no se restaurará.")) return;
     setSales(sales.filter((s) => s.id !== id));
   };
 
@@ -87,20 +86,20 @@ function SalesPage() {
   return (
     <div>
       <PageHeader
-        title="Sales"
-        description="Issue receipts and track revenue."
+        title="Ventas"
+        description="Emite recibos y controla los ingresos."
         actions={
           <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
             <DialogTrigger asChild>
-              <Button><Plus /> New sale</Button>
+              <Button><Plus /> Nueva venta</Button>
             </DialogTrigger>
             <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>New sale</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>Nueva venta</DialogTitle></DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label>Client</Label>
+                  <Label>Cliente</Label>
                   <Select value={clientId} onValueChange={setClientId}>
-                    <SelectTrigger><SelectValue placeholder={clients.length ? "Choose client" : "Add a client first"} /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder={clients.length ? "Elige un cliente" : "Agrega primero un cliente"} /></SelectTrigger>
                     <SelectContent>{clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
@@ -108,24 +107,24 @@ function SalesPage() {
                 <div className="rounded-md border border-border">
                   <div className="p-3 flex gap-2 border-b border-border bg-muted/30">
                     <Select value={pickItem} onValueChange={setPickItem}>
-                      <SelectTrigger className="flex-1"><SelectValue placeholder="Pick item to add" /></SelectTrigger>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Selecciona pieza para agregar" /></SelectTrigger>
                       <SelectContent>
                         {inventory.filter((i) => i.quantity > 0).map((i) => (
                           <SelectItem key={i.id} value={i.id}>{i.sku} — {i.name} ({fmtMoney(i.price, settings.currency)})</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <Button onClick={addLine} disabled={!pickItem}><Plus /> Add</Button>
+                    <Button onClick={addLine} disabled={!pickItem}><Plus /> Agregar</Button>
                   </div>
                   {lines.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-muted-foreground">No items added.</div>
+                    <div className="p-8 text-center text-sm text-muted-foreground">Sin piezas agregadas.</div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead className="text-xs uppercase tracking-wider text-muted-foreground">
                         <tr>
-                          <th className="text-left px-3 py-2">Item</th>
-                          <th className="text-right px-3 py-2 w-24">Price</th>
-                          <th className="text-right px-3 py-2 w-20">Qty</th>
+                          <th className="text-left px-3 py-2">Pieza</th>
+                          <th className="text-right px-3 py-2 w-24">Precio</th>
+                          <th className="text-right px-3 py-2 w-20">Cant.</th>
                           <th className="text-right px-3 py-2 w-28">Total</th>
                           <th className="px-3 py-2 w-10"></th>
                         </tr>
@@ -149,14 +148,14 @@ function SalesPage() {
 
                 <div className="ml-auto w-64 space-y-1 text-sm">
                   <Row label="Subtotal" value={fmtMoney(subtotal, settings.currency)} />
-                  <Row label={`Tax (${settings.taxRate}%)`} value={fmtMoney(tax, settings.currency)} />
+                  <Row label={`Impuesto (${settings.taxRate}%)`} value={fmtMoney(tax, settings.currency)} />
                   <div className="h-px bg-border my-1" />
                   <Row label="Total" value={fmtMoney(total, settings.currency)} bold />
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button onClick={save}>Record sale & generate receipt</Button>
+                <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+                <Button onClick={save}>Registrar venta y generar recibo</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -167,17 +166,17 @@ function SalesPage() {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th className="text-left px-4 py-3">Receipt #</th>
-              <th className="text-left px-4 py-3">Client</th>
-              <th className="text-left px-4 py-3">Date</th>
-              <th className="text-right px-4 py-3">Items</th>
+              <th className="text-left px-4 py-3">Recibo #</th>
+              <th className="text-left px-4 py-3">Cliente</th>
+              <th className="text-left px-4 py-3">Fecha</th>
+              <th className="text-right px-4 py-3">Piezas</th>
               <th className="text-right px-4 py-3">Total</th>
               <th className="px-4 py-3 w-28"></th>
             </tr>
           </thead>
           <tbody>
             {sales.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-12 text-muted-foreground">No sales yet.</td></tr>
+              <tr><td colSpan={6} className="text-center py-12 text-muted-foreground">Aún no hay ventas.</td></tr>
             ) : sales.map((s) => (
               <tr key={s.id} className="border-t border-border hover:bg-muted/30">
                 <td className="px-4 py-3 font-mono text-xs">{s.receiptNo}</td>
@@ -187,7 +186,7 @@ function SalesPage() {
                 <td className="px-4 py-3 text-right font-mono">{fmtMoney(s.total, settings.currency)}</td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
-                    <Button size="icon" variant="ghost" onClick={() => setViewing(s)} title="Receipt"><ReceiptIcon className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" onClick={() => setViewing(s)} title="Recibo"><ReceiptIcon className="h-4 w-4" /></Button>
                     <Button size="icon" variant="ghost" onClick={() => remove(s.id)}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </td>
@@ -197,7 +196,7 @@ function SalesPage() {
         </table>
       </div>
 
-      <ReceiptDialog sale={viewing} onClose={() => setViewing(null)} clientName={clientName} />
+      <ReceiptDialog sale={viewing} onClose={() => setViewing(null)} />
     </div>
   );
 }
@@ -210,7 +209,7 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
   );
 }
 
-function ReceiptDialog({ sale, onClose, clientName }: { sale: Sale | null; onClose: () => void; clientName: (id: string) => string }) {
+function ReceiptDialog({ sale, onClose }: { sale: Sale | null; onClose: () => void }) {
   const [settings] = useSettings();
   const [clients] = useLocalStore<Client[]>("lustre_clients", []);
   if (!sale) return null;
@@ -218,7 +217,7 @@ function ReceiptDialog({ sale, onClose, clientName }: { sale: Sale | null; onClo
   return (
     <Dialog open={!!sale} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
-        <DialogHeader className="no-print"><DialogTitle>Receipt {sale.receiptNo}</DialogTitle></DialogHeader>
+        <DialogHeader className="no-print"><DialogTitle>Recibo {sale.receiptNo}</DialogTitle></DialogHeader>
         <div id="receipt-print" className="bg-white text-black p-6 rounded-md font-sans">
           <div className="text-center border-b border-gray-300 pb-3">
             <div className="font-display text-2xl" style={{ fontFamily: "'Cormorant Garamond', serif" }}>{settings.businessName}</div>
@@ -227,13 +226,13 @@ function ReceiptDialog({ sale, onClose, clientName }: { sale: Sale | null; onClo
           </div>
           <div className="flex justify-between text-xs mt-3">
             <div>
-              <div className="text-gray-500 uppercase tracking-wider">Bill to</div>
-              <div className="font-medium text-sm">{client?.name || "Walk-in"}</div>
+              <div className="text-gray-500 uppercase tracking-wider">Cliente</div>
+              <div className="font-medium text-sm">{client?.name || "Mostrador"}</div>
               {client?.email && <div>{client.email}</div>}
               {client?.phone && <div>{client.phone}</div>}
             </div>
             <div className="text-right">
-              <div className="text-gray-500 uppercase tracking-wider">Receipt</div>
+              <div className="text-gray-500 uppercase tracking-wider">Recibo</div>
               <div className="font-mono text-sm">{sale.receiptNo}</div>
               <div>{new Date(sale.createdAt).toLocaleString()}</div>
             </div>
@@ -241,9 +240,9 @@ function ReceiptDialog({ sale, onClose, clientName }: { sale: Sale | null; onClo
           <table className="w-full text-xs mt-4">
             <thead>
               <tr className="border-b border-gray-300">
-                <th className="text-left py-2">Item</th>
-                <th className="text-right py-2">Qty</th>
-                <th className="text-right py-2">Price</th>
+                <th className="text-left py-2">Pieza</th>
+                <th className="text-right py-2">Cant.</th>
+                <th className="text-right py-2">Precio</th>
                 <th className="text-right py-2">Total</th>
               </tr>
             </thead>
@@ -263,16 +262,16 @@ function ReceiptDialog({ sale, onClose, clientName }: { sale: Sale | null; onClo
           </table>
           <div className="ml-auto w-56 mt-3 text-xs space-y-1">
             <div className="flex justify-between"><span>Subtotal</span><span className="font-mono">{fmtMoney(sale.subtotal, settings.currency)}</span></div>
-            <div className="flex justify-between"><span>Tax ({sale.taxRate}%)</span><span className="font-mono">{fmtMoney(sale.tax, settings.currency)}</span></div>
+            <div className="flex justify-between"><span>Impuesto ({sale.taxRate}%)</span><span className="font-mono">{fmtMoney(sale.tax, settings.currency)}</span></div>
             <div className="flex justify-between border-t border-gray-300 pt-1 font-semibold text-sm"><span>Total</span><span className="font-mono">{fmtMoney(sale.total, settings.currency)}</span></div>
           </div>
           <div className="text-center text-xs text-gray-500 mt-6 border-t border-gray-300 pt-3">
-            Thank you for shopping with {settings.businessName}.
+            Gracias por su compra en {settings.businessName}.
           </div>
         </div>
         <DialogFooter className="no-print">
-          <Button variant="outline" onClick={onClose}>Close</Button>
-          <Button onClick={() => window.print()}><Printer /> Print receipt</Button>
+          <Button variant="outline" onClick={onClose}>Cerrar</Button>
+          <Button onClick={() => window.print()}><Printer /> Imprimir recibo</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

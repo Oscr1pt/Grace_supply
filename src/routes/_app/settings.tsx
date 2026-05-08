@@ -17,49 +17,49 @@ function SettingsPage() {
 
   const save = () => {
     setSettings(form);
-    toast.success("Settings saved");
+    toast.success("Ajustes guardados");
   };
 
   const reset = () => {
     setForm(defaultSettings);
     setSettings(defaultSettings);
-    toast.success("Reset to defaults");
+    toast.success("Restablecido a valores por defecto");
   };
 
   return (
     <div>
-      <PageHeader title="Settings" description="Business profile, tax rate and currency." />
+      <PageHeader title="Ajustes" description="Datos del negocio, impuesto y moneda." />
 
       <div className="rounded-lg border border-border bg-card p-6 max-w-xl space-y-4">
-        <Field label="Business name"><Input value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} /></Field>
-        <Field label="Address"><Input value={form.businessAddress} onChange={(e) => setForm({ ...form, businessAddress: e.target.value })} /></Field>
-        <Field label="Phone"><Input value={form.businessPhone} onChange={(e) => setForm({ ...form, businessPhone: e.target.value })} /></Field>
+        <Field label="Nombre del negocio"><Input value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} /></Field>
+        <Field label="Dirección"><Input value={form.businessAddress} onChange={(e) => setForm({ ...form, businessAddress: e.target.value })} /></Field>
+        <Field label="Teléfono"><Input value={form.businessPhone} onChange={(e) => setForm({ ...form, businessPhone: e.target.value })} /></Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Sales tax rate (%)"><Input type="number" step="0.001" value={form.taxRate} onChange={(e) => setForm({ ...form, taxRate: +e.target.value })} /></Field>
-          <Field label="Currency code"><Input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} placeholder="USD" /></Field>
+          <Field label="Tasa de impuesto (%)"><Input type="number" step="0.001" value={form.taxRate} onChange={(e) => setForm({ ...form, taxRate: +e.target.value })} /></Field>
+          <Field label="Código de moneda"><Input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} placeholder="MXN" /></Field>
         </div>
         <div className="flex gap-2 pt-2">
-          <Button onClick={save}>Save settings</Button>
-          <Button variant="outline" onClick={reset}>Reset to defaults</Button>
+          <Button onClick={save}>Guardar ajustes</Button>
+          <Button variant="outline" onClick={reset}>Restablecer</Button>
         </div>
       </div>
 
       <div className="rounded-lg border border-destructive/30 bg-card p-6 max-w-xl mt-6">
-        <h3 className="font-display text-lg">Danger zone</h3>
+        <h3 className="font-display text-lg">Zona de peligro</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Wipe all local data (clients, inventory, sales, purchases).
+          Borra todos los datos locales (clientes, inventario, ventas, compras).
         </p>
         <Button
           variant="destructive"
           className="mt-3"
           onClick={() => {
-            if (!confirm("This will delete all data. Continue?")) return;
+            if (!confirm("Esto eliminará todos los datos. ¿Continuar?")) return;
             ["lustre_clients", "lustre_inventory", "lustre_sales", "lustre_purchases"].forEach((k) => localStorage.removeItem(k));
-            toast.success("All data cleared");
+            toast.success("Todos los datos borrados");
             setTimeout(() => window.location.reload(), 600);
           }}
         >
-          Clear all data
+          Borrar todos los datos
         </Button>
       </div>
     </div>

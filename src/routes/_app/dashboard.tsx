@@ -23,23 +23,23 @@ function Dashboard() {
 
   return (
     <div>
-      <PageHeader title="Dashboard" description={`Welcome to ${settings.businessName}.`} />
+      <PageHeader title="Panel" description={`Bienvenido a ${settings.businessName}.`} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Revenue" value={fmtMoney(totalRevenue, settings.currency)} hint={`${sales.length} sales`} />
-        <StatCard label="Inventory Value" value={fmtMoney(inventoryValue, settings.currency)} hint={`${inventory.length} items`} />
-        <StatCard label="Clients" value={String(clients.length)} hint="active records" />
-        <StatCard label="Low Stock" value={String(lowStock.length)} hint="≤ 1 in stock" />
+        <StatCard label="Ingresos totales" value={fmtMoney(totalRevenue, settings.currency)} hint={`${sales.length} ventas`} />
+        <StatCard label="Valor de inventario" value={fmtMoney(inventoryValue, settings.currency)} hint={`${inventory.length} piezas`} />
+        <StatCard label="Clientes" value={String(clients.length)} hint="registros activos" />
+        <StatCard label="Bajo stock" value={String(lowStock.length)} hint="≤ 1 en existencia" />
       </div>
 
       <div className="grid gap-6 mt-8 lg:grid-cols-2">
         <div className="rounded-lg border border-border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-display">Recent Sales</h2>
-            <Link to="/sales" className="text-xs text-muted-foreground hover:text-foreground">View all →</Link>
+            <h2 className="text-xl font-display">Ventas recientes</h2>
+            <Link to="/sales" className="text-xs text-muted-foreground hover:text-foreground">Ver todas →</Link>
           </div>
           {recent.length === 0 ? (
-            <EmptyHint icon={<Receipt className="h-5 w-5" />} text="No sales yet. Create your first receipt." />
+            <EmptyHint icon={<Receipt className="h-5 w-5" />} text="Aún no hay ventas. Crea tu primer recibo." />
           ) : (
             <ul className="divide-y divide-border">
               {recent.map((s) => {
@@ -48,7 +48,7 @@ function Dashboard() {
                   <li key={s.id} className="py-3 flex items-center justify-between">
                     <div>
                       <div className="text-sm font-medium">{s.receiptNo}</div>
-                      <div className="text-xs text-muted-foreground">{client?.name || "Walk-in"}</div>
+                      <div className="text-xs text-muted-foreground">{client?.name || "Mostrador"}</div>
                     </div>
                     <div className="text-sm font-mono">{fmtMoney(s.total, settings.currency)}</div>
                   </li>
@@ -60,13 +60,13 @@ function Dashboard() {
 
         <div className="rounded-lg border border-border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-display">Quick Actions</h2>
+            <h2 className="text-xl font-display">Acciones rápidas</h2>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <QuickLink to="/sales" icon={<Receipt className="h-5 w-5" />} label="New sale" />
-            <QuickLink to="/inventory" icon={<Package className="h-5 w-5" />} label="Add item" />
-            <QuickLink to="/clients" icon={<Users className="h-5 w-5" />} label="Add client" />
-            <QuickLink to="/purchases" icon={<TrendingUp className="h-5 w-5" />} label="Log purchase" />
+            <QuickLink to="/sales" icon={<Receipt className="h-5 w-5" />} label="Nueva venta" />
+            <QuickLink to="/inventory" icon={<Package className="h-5 w-5" />} label="Agregar pieza" />
+            <QuickLink to="/clients" icon={<Users className="h-5 w-5" />} label="Agregar cliente" />
+            <QuickLink to="/purchases" icon={<TrendingUp className="h-5 w-5" />} label="Registrar compra" />
           </div>
         </div>
       </div>
