@@ -51,7 +51,7 @@ function LoginPage() {
         <div className="relative flex flex-col justify-between p-12 w-full">
           <div className="flex items-center gap-2">
             <Gem className="h-7 w-7 text-sidebar-primary" />
-            <span className="font-display text-3xl text-sidebar-primary">Lustre</span>
+            <span className="font-display text-3xl text-sidebar-primary">IMPERIO GOLD</span>
           </div>
           <div>
             <h2 className="font-display text-5xl leading-tight">
@@ -61,7 +61,7 @@ function LoginPage() {
               La suite completa de ventas, inventario y clientes — diseñada para joyeros que cuidan cada quilate.
             </p>
           </div>
-          <p className="text-xs text-sidebar-foreground/50">© Lustre Suite Joyera</p>
+          <p className="text-xs text-sidebar-foreground/50">© IMPERIO GOLD Joyería · Santo Domingo, RD</p>
         </div>
       </div>
 
@@ -69,7 +69,7 @@ function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="lg:hidden flex items-center gap-2 mb-8">
             <Gem className="h-6 w-6 text-primary" />
-            <span className="font-display text-2xl">Lustre</span>
+            <span className="font-display text-2xl">IMPERIO GOLD</span>
           </div>
           <h1 className="text-3xl font-display">{mode === "login" ? "Iniciar sesión" : "Crear cuenta"}</h1>
           <p className="text-sm text-muted-foreground mt-1">

@@ -2,11 +2,11 @@ import { useLocalStore } from "./storage";
 import type { Settings } from "./types";
 
 export const defaultSettings: Settings = {
-  businessName: "Lustre Joyería Fina",
-  businessAddress: "Av. de los Diamantes 123, Ciudad",
-  businessPhone: "+52 (55) 0102-2024",
-  taxRate: 16,
-  currency: "MXN",
+  businessName: "IMPERIO GOLD JOYERIA",
+  businessAddress: "Santo Domingo, República Dominicana",
+  businessPhone: "+1 (809) 000-0000",
+  taxRate: 18,
+  currency: "DOP",
 };
 
 export function useSettings() {
