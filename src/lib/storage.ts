@@ -50,5 +50,5 @@ export function fmtMoney(amount: number, currency = "DOP") {
 }
 
 export function fmtDate(iso: string) {
-  return new Date(iso).toLocaleString();
+  return new Date(iso).toLocaleString("es-DO");
 }
