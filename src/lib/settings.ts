@@ -3,9 +3,9 @@ import type { Settings } from "./types";
 
 export const defaultSettings: Settings = {
   businessName: "IMPERIO GOLD JOYERIA",
-  businessAddress: "Av. de los Diamantes 123, Ciudad",
-  businessPhone: "(809)-123-4567",
-  taxRate: 16,
+  businessAddress: "Santo Domingo, República Dominicana",
+  businessPhone: "+1 (809) 000-0000",
+  taxRate: 18,
   currency: "DOP",
 };
 

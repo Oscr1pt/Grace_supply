@@ -22,9 +22,9 @@ export function AppSidebar() {
         <div className="flex items-center gap-2">
           <Gem className="h-6 w-6 text-sidebar-primary" />
           <div>
-            <h1 className="font-display text-2xl leading-none text-sidebar-primary">Lustre</h1>
+            <h1 className="font-display text-xl leading-none text-sidebar-primary">IMPERIO GOLD</h1>
             <p className="text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60 mt-1">
-              Suite Joyera
+              Joyería
             </p>
           </div>
         </div>
