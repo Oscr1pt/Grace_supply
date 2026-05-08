@@ -41,11 +41,11 @@ export function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
-export function fmtMoney(amount: number, currency = "USD") {
+export function fmtMoney(amount: number, currency = "DOP") {
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount);
+    return new Intl.NumberFormat("es-DO", { style: "currency", currency }).format(amount);
   } catch {
-    return `$${amount.toFixed(2)}`;
+    return `RD$${amount.toFixed(2)}`;
   }
 }
 
