@@ -69,7 +69,7 @@ function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="lg:hidden flex items-center gap-2 mb-8">
             <Gem className="h-6 w-6 text-primary" />
-            <span className="font-display text-2xl">Lustre</span>
+            <span className="font-display text-2xl">IMPERIO GOLD</span>
           </div>
           <h1 className="text-3xl font-display">{mode === "login" ? "Iniciar sesión" : "Crear cuenta"}</h1>
           <p className="text-sm text-muted-foreground mt-1">
