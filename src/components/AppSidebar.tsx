@@ -4,12 +4,12 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
 const items = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/clients", label: "Clients", icon: Users },
-  { to: "/inventory", label: "Inventory", icon: Package },
-  { to: "/sales", label: "Sales", icon: Receipt },
-  { to: "/purchases", label: "Purchases", icon: ShoppingBag },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/dashboard", label: "Panel", icon: LayoutDashboard },
+  { to: "/clients", label: "Clientes", icon: Users },
+  { to: "/inventory", label: "Inventario", icon: Package },
+  { to: "/sales", label: "Ventas", icon: Receipt },
+  { to: "/purchases", label: "Compras", icon: ShoppingBag },
+  { to: "/settings", label: "Ajustes", icon: Settings },
 ] as const;
 
 export function AppSidebar() {
@@ -24,7 +24,7 @@ export function AppSidebar() {
           <div>
             <h1 className="font-display text-2xl leading-none text-sidebar-primary">Lustre</h1>
             <p className="text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60 mt-1">
-              Jewelry Suite
+              Suite Joyera
             </p>
           </div>
         </div>
@@ -52,7 +52,7 @@ export function AppSidebar() {
       </nav>
 
       <div className="border-t border-sidebar-border p-4">
-        <div className="text-xs text-sidebar-foreground/60 mb-1">Signed in as</div>
+        <div className="text-xs text-sidebar-foreground/60 mb-1">Sesión iniciada</div>
         <div className="text-sm font-medium truncate">{user?.name}</div>
         <div className="text-xs text-sidebar-foreground/60 truncate">{user?.email}</div>
         <Button
@@ -62,7 +62,7 @@ export function AppSidebar() {
           className="w-full mt-3 justify-start text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <LogOut className="h-4 w-4" />
-          Sign out
+          Cerrar sesión
         </Button>
       </div>
     </aside>

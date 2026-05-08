@@ -8,21 +8,24 @@ export type Client = {
   createdAt: string;
 };
 
+export type ItemKind = "joya" | "piedra";
+
 export type InventoryItem = {
   id: string;
   sku: string; // used as barcode value
+  kind: ItemKind; // "joya" full piece, "piedra" loose stone
   name: string;
-  category: "ring" | "necklace" | "bracelet" | "earring" | "pendant" | "watch" | "other";
-  metal: string; // e.g. "Yellow Gold"
-  karat: string; // e.g. "18K", "925"
-  weightGrams: number;
-  stone?: string; // e.g. "Diamond"
+  category: "anillo" | "collar" | "pulsera" | "arete" | "dije" | "reloj" | "piedra" | "otro";
+  metal?: string; // optional for loose stones
+  karat?: string; // optional for loose stones
+  weightGrams?: number;
+  stone?: string;
   stoneCarats?: number;
   stoneCut?: string;
   stoneClarity?: string;
   stoneColor?: string;
-  sizeMm?: number; // ring/chain size in mm
-  sizeLabel?: string; // e.g. "US 7" or "18 in"
+  sizeMm?: number;
+  sizeLabel?: string;
   costPrice: number;
   price: number;
   quantity: number;
@@ -64,6 +67,6 @@ export type Settings = {
   businessName: string;
   businessAddress: string;
   businessPhone: string;
-  taxRate: number; // percent
+  taxRate: number;
   currency: string;
 };

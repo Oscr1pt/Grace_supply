@@ -30,9 +30,9 @@ function LoginPage() {
     try {
       if (mode === "login") await login(email, password);
       else await register(email, password, name || email.split("@")[0]);
-      toast.success(mode === "login" ? "Welcome back" : "Account created");
+      toast.success(mode === "login" ? "Bienvenido de nuevo" : "Cuenta creada");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      toast.error(err instanceof Error ? err.message : "Algo salió mal");
     } finally {
       setBusy(false);
     }
@@ -55,13 +55,13 @@ function LoginPage() {
           </div>
           <div>
             <h2 className="font-display text-5xl leading-tight">
-              Every gem tells<br />a story.
+              Cada gema cuenta<br />una historia.
             </h2>
             <p className="mt-4 text-sidebar-foreground/70 max-w-sm">
-              The complete sales, inventory and client suite — designed for fine jewelers who care about every carat.
+              La suite completa de ventas, inventario y clientes — diseñada para joyeros que cuidan cada quilate.
             </p>
           </div>
-          <p className="text-xs text-sidebar-foreground/50">© Lustre Jewelry Suite</p>
+          <p className="text-xs text-sidebar-foreground/50">© Lustre Suite Joyera</p>
         </div>
       </div>
 
@@ -71,28 +71,28 @@ function LoginPage() {
             <Gem className="h-6 w-6 text-primary" />
             <span className="font-display text-2xl">Lustre</span>
           </div>
-          <h1 className="text-3xl font-display">{mode === "login" ? "Sign in" : "Create account"}</h1>
+          <h1 className="text-3xl font-display">{mode === "login" ? "Iniciar sesión" : "Crear cuenta"}</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {mode === "login" ? "Welcome back to your boutique." : "Set up your jeweler workspace."}
+            {mode === "login" ? "Bienvenido de vuelta a tu boutique." : "Configura tu espacio de joyería."}
           </p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">
             {mode === "register" && (
               <div className="space-y-1.5">
-                <Label htmlFor="name">Your name</Label>
-                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" />
+                <Label htmlFor="name">Tu nombre</Label>
+                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Juana Pérez" />
               </div>
             )}
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Correo electrónico</Label>
               <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Contraseña</Label>
               <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             <Button type="submit" disabled={busy} className="w-full">
-              {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+              {busy ? "Espera…" : mode === "login" ? "Entrar" : "Crear cuenta"}
             </Button>
           </form>
 
@@ -101,12 +101,12 @@ function LoginPage() {
             onClick={() => setMode(mode === "login" ? "register" : "login")}
             className="mt-6 text-sm text-muted-foreground hover:text-foreground"
           >
-            {mode === "login" ? "Need an account? Create one" : "Already have an account? Sign in"}
+            {mode === "login" ? "¿Necesitas una cuenta? Crea una" : "¿Ya tienes cuenta? Inicia sesión"}
           </button>
 
           {mode === "login" && (
             <p className="mt-6 text-xs text-muted-foreground border-t border-border pt-4">
-              Demo account preloaded: <span className="font-mono">demo@lustre.co</span> / <span className="font-mono">demo1234</span>
+              Cuenta demo precargada: <span className="font-mono">demo@lustre.co</span> / <span className="font-mono">demo1234</span>
             </p>
           )}
         </div>

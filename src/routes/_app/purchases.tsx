@@ -29,19 +29,19 @@ function PurchasesPage() {
   const [restock, setRestock] = useState(true);
 
   const save = () => {
-    if (!form.supplier.trim()) { toast.error("Supplier is required"); return; }
+    if (!form.supplier.trim()) { toast.error("El proveedor es obligatorio"); return; }
     const total = form.quantity * form.unitCost;
     setPurchases([{ id: uid(), createdAt: new Date().toISOString(), total, ...form }, ...purchases]);
     if (restock && form.itemId) {
       setInventory(inventory.map((i) => i.id === form.itemId ? { ...i, quantity: i.quantity + form.quantity } : i));
     }
-    toast.success("Purchase logged");
+    toast.success("Compra registrada");
     setOpen(false);
     setForm(empty);
   };
 
   const remove = (id: string) => {
-    if (!confirm("Delete this purchase?")) return;
+    if (!confirm("¿Eliminar esta compra?")) return;
     setPurchases(purchases.filter((p) => p.id !== id));
   };
 
@@ -50,33 +50,33 @@ function PurchasesPage() {
   return (
     <div>
       <PageHeader
-        title="Purchases"
-        description="Restock and supplier expenses."
+        title="Compras"
+        description="Reabastecimientos y gastos con proveedores."
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild><Button><Plus /> New purchase</Button></DialogTrigger>
+            <DialogTrigger asChild><Button><Plus /> Nueva compra</Button></DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>New purchase</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>Nueva compra</DialogTitle></DialogHeader>
               <div className="space-y-3">
-                <Field label="Supplier"><Input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="Antwerp Diamonds Co." /></Field>
-                <Field label="Linked inventory item (optional)">
+                <Field label="Proveedor"><Input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="Diamantes de Amberes S.A." /></Field>
+                <Field label="Pieza de inventario vinculada (opcional)">
                   <Select value={form.itemId || "none"} onValueChange={(v) => setForm({ ...form, itemId: v === "none" ? "" : v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">— None —</SelectItem>
+                      <SelectItem value="none">— Ninguna —</SelectItem>
                       {inventory.map((i) => <SelectItem key={i.id} value={i.id}>{i.sku} — {i.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="Description"><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Loose diamonds, 1ct VS1…" /></Field>
+                <Field label="Descripción"><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Diamantes sueltos, 1ct VS1…" /></Field>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Quantity"><Input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: +e.target.value })} /></Field>
-                  <Field label="Unit cost"><Input type="number" step="0.01" value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: +e.target.value })} /></Field>
+                  <Field label="Cantidad"><Input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: +e.target.value })} /></Field>
+                  <Field label="Costo unitario"><Input type="number" step="0.01" value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: +e.target.value })} /></Field>
                 </div>
                 {form.itemId && (
                   <label className="flex items-center gap-2 text-sm text-muted-foreground">
                     <input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} />
-                    Increase linked item stock by {form.quantity}
+                    Aumentar existencia de la pieza vinculada en {form.quantity}
                   </label>
                 )}
                 <div className="text-right text-sm">
@@ -84,8 +84,8 @@ function PurchasesPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button onClick={save}>Log purchase</Button>
+                <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+                <Button onClick={save}>Registrar compra</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -96,17 +96,17 @@ function PurchasesPage() {
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th className="text-left px-4 py-3">Supplier</th>
-              <th className="text-left px-4 py-3">Item / description</th>
-              <th className="text-left px-4 py-3">Date</th>
-              <th className="text-right px-4 py-3">Qty</th>
+              <th className="text-left px-4 py-3">Proveedor</th>
+              <th className="text-left px-4 py-3">Pieza / descripción</th>
+              <th className="text-left px-4 py-3">Fecha</th>
+              <th className="text-right px-4 py-3">Cant.</th>
               <th className="text-right px-4 py-3">Total</th>
               <th className="px-4 py-3 w-12"></th>
             </tr>
           </thead>
           <tbody>
             {purchases.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-12 text-muted-foreground">No purchases yet.</td></tr>
+              <tr><td colSpan={6} className="text-center py-12 text-muted-foreground">Aún no hay compras.</td></tr>
             ) : purchases.map((p) => (
               <tr key={p.id} className="border-t border-border hover:bg-muted/30">
                 <td className="px-4 py-3 font-medium">{p.supplier}</td>
