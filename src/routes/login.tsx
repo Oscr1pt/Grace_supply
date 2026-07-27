@@ -14,8 +14,8 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("demo1234");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -101,9 +101,7 @@ function LoginPage() {
             </Button>
           </form>
 
-          <p className="mt-6 text-xs text-muted-foreground border-t border-border pt-4">
-            Cuenta demo: usuario <span className="font-mono">admin</span> / contraseña <span className="font-mono">demo1234</span>
-          </p>
+
         </div>
       </div>
     </div>
