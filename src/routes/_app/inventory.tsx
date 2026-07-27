@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Plus, Pencil, Trash2, Barcode as BarcodeIcon, Printer, Search, Gem, Package } from "lucide-react";
-import { Barcode } from "@/components/Barcode";
+
+import { BarcodeLabel, LabelSizeControls } from "@/components/BarcodeLabel";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/inventory")({
@@ -42,7 +43,7 @@ function genSku() {
 
 function InventoryPage() {
   const [items, setItems] = useLocalStore<InventoryItem[]>("lustre_inventory", []);
-  const [settings] = useSettings();
+  const [settings, setSettings] = useSettings();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -228,17 +229,9 @@ function InventoryPage() {
         <DialogContent>
           <DialogHeader><DialogTitle className="no-print">Código de barras imprimible</DialogTitle></DialogHeader>
           {barcodeItem && (
-            <div id="barcode-print" className="bg-white text-black p-6 rounded-md text-center">
-              <div className="font-display text-lg">{settings.businessName}</div>
-              <div className="text-sm mt-1">{barcodeItem.name}</div>
-              <div className="text-xs text-gray-600 mt-0.5">
-                {barcodeItem.kind === "piedra"
-                  ? `${barcodeItem.stone || "Piedra"} ${barcodeItem.stoneCarats || 0}ct · ${fmtMoney(barcodeItem.price, settings.currency)}`
-                  : `${barcodeItem.karat || ""} ${barcodeItem.metal || ""} · ${fmtMoney(barcodeItem.price, settings.currency)}`}
-              </div>
-              <div className="flex justify-center mt-4">
-                <Barcode value={barcodeItem.sku} height={80} />
-              </div>
+            <div className="space-y-4">
+              <BarcodeLabel item={barcodeItem} settings={settings} />
+              <LabelSizeControls settings={settings} onChange={(patch) => setSettings({ ...settings, ...patch })} />
             </div>
           )}
           <DialogFooter className="no-print">

@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LabelSizeControls } from "@/components/BarcodeLabel";
 import { toast } from "sonner";
 import { useState } from "react";
 
@@ -43,6 +44,13 @@ function SettingsPage() {
           <Button variant="outline" onClick={reset}>Restablecer</Button>
         </div>
       </div>
+
+      <div className="max-w-xl mt-6">
+        <h3 className="font-display text-lg mb-2">Etiquetas de código de barras</h3>
+        <LabelSizeControls settings={settings} onChange={(patch) => setSettings({ ...settings, ...patch })} />
+      </div>
+
+
 
       <div className="rounded-lg border border-destructive/30 bg-card p-6 max-w-xl mt-6">
         <h3 className="font-display text-lg">Zona de peligro</h3>

@@ -6,10 +6,12 @@ type Props = {
   width?: number;
   height?: number;
   displayValue?: boolean;
+  margin?: number;
+  fontSize?: number;
   className?: string;
 };
 
-export function Barcode({ value, width = 2, height = 60, displayValue = true, className }: Props) {
+export function Barcode({ value, width = 2, height = 60, displayValue = true, margin = 8, fontSize = 14, className }: Props) {
   const ref = useRef<SVGSVGElement>(null);
   useEffect(() => {
     if (ref.current && value) {
@@ -20,8 +22,8 @@ export function Barcode({ value, width = 2, height = 60, displayValue = true, cl
           height,
           displayValue,
           font: "Inter, sans-serif",
-          fontSize: 14,
-          margin: 8,
+          fontSize,
+          margin,
           background: "#ffffff",
           lineColor: "#000000",
         });
@@ -29,6 +31,6 @@ export function Barcode({ value, width = 2, height = 60, displayValue = true, cl
         console.error(e);
       }
     }
-  }, [value, width, height, displayValue]);
+  }, [value, width, height, displayValue, margin, fontSize]);
   return <svg ref={ref} className={className} />;
 }
