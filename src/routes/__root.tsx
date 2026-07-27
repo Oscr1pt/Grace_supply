@@ -62,7 +62,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "IMPERIO GOLD JOYERIA — Sistema de Ventas" },
       { name: "description", content: "Manage clients, inventory, sales and purchases for your jewelry business." },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap",
+      },
+    ],
   }),
   shellComponent: RootShell,
   component: RootComponent,

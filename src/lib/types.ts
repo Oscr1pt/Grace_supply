@@ -69,4 +69,11 @@ export type Settings = {
   businessPhone: string;
   taxRate: number;
   currency: string;
+  /** Printed label size in millimeters */
+  labelWidthMm: number;
+  labelHeightMm: number;
+  /** Barcode bar thickness and bar height (px) */
+  labelBarWidth: number;
+  labelBarHeight: number;
+  labelShowPrice: boolean;
 };
