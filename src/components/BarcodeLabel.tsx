@@ -103,6 +103,8 @@ export function BarcodeLabel({ item, settings }: { item: InventoryItem; settings
           value={item.sku}
           width={settings.labelBarWidth}
           height={settings.labelBarHeight}
+          margin={2}
+          fontSize={compact ? 8 : 11}
           className="max-w-full"
         />
         {settings.labelShowPrice && (
