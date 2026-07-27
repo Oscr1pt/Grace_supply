@@ -48,23 +48,23 @@ export function LabelSizeControls({
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>Ancho (mm)</Label>
-          <Input type="number" min={10} value={settings.labelWidthMm}
-            onChange={(e) => onChange({ labelWidthMm: Math.max(10, +e.target.value || 0) })} />
+          <Input type="number" min={10} max={150} value={settings.labelWidthMm}
+            onChange={(e) => onChange({ labelWidthMm: Math.min(150, Math.max(10, +e.target.value || 0)) })} />
         </div>
         <div className="space-y-1.5">
           <Label>Alto (mm)</Label>
-          <Input type="number" min={8} value={settings.labelHeightMm}
-            onChange={(e) => onChange({ labelHeightMm: Math.max(8, +e.target.value || 0) })} />
+          <Input type="number" min={8} max={100} value={settings.labelHeightMm}
+            onChange={(e) => onChange({ labelHeightMm: Math.min(100, Math.max(8, +e.target.value || 0)) })} />
         </div>
         <div className="space-y-1.5">
           <Label>Grosor de barras</Label>
-          <Input type="number" step="0.1" min={0.6} value={settings.labelBarWidth}
-            onChange={(e) => onChange({ labelBarWidth: Math.max(0.6, +e.target.value || 0) })} />
+          <Input type="number" step="0.1" min={0.6} max={5} value={settings.labelBarWidth}
+            onChange={(e) => onChange({ labelBarWidth: Math.min(5, Math.max(0.6, +e.target.value || 0)) })} />
         </div>
         <div className="space-y-1.5">
           <Label>Alto de barras (px)</Label>
-          <Input type="number" min={15} value={settings.labelBarHeight}
-            onChange={(e) => onChange({ labelBarHeight: Math.max(15, +e.target.value || 0) })} />
+          <Input type="number" min={15} max={120} value={settings.labelBarHeight}
+            onChange={(e) => onChange({ labelBarHeight: Math.min(120, Math.max(15, +e.target.value || 0)) })} />
         </div>
       </div>
 

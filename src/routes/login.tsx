@@ -12,12 +12,10 @@ export const Route = createFileRoute("/login")({
 });
 
 function LoginPage() {
-  const { user, login, register } = useAuth();
+  const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("demo@lustre.co");
+  const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("demo1234");
-  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -28,9 +26,8 @@ function LoginPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      if (mode === "login") await login(email, password);
-      else await register(email, password, name || email.split("@")[0]);
-      toast.success(mode === "login" ? "Bienvenido de nuevo" : "Cuenta creada");
+      await login(username, password);
+      toast.success("Bienvenido de nuevo");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Algo salió mal");
     } finally {
@@ -71,44 +68,42 @@ function LoginPage() {
             <Gem className="h-6 w-6 text-primary" />
             <span className="font-display text-2xl">IMPERIO GOLD</span>
           </div>
-          <h1 className="text-3xl font-display">{mode === "login" ? "Iniciar sesión" : "Crear cuenta"}</h1>
+          <h1 className="text-3xl font-display">Iniciar sesión</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {mode === "login" ? "Bienvenido de vuelta a tu boutique." : "Configura tu espacio de joyería."}
+            Bienvenido de vuelta a tu boutique.
           </p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">
-            {mode === "register" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Tu nombre</Label>
-                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Juana Pérez" />
-              </div>
-            )}
             <div className="space-y-1.5">
-              <Label htmlFor="email">Correo electrónico</Label>
-              <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Label htmlFor="username">Usuario</Label>
+              <Input
+                id="username"
+                type="text"
+                required
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">Contraseña</Label>
-              <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input
+                id="password"
+                type="password"
+                required
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
             </div>
             <Button type="submit" disabled={busy} className="w-full">
-              {busy ? "Espera…" : mode === "login" ? "Entrar" : "Crear cuenta"}
+              {busy ? "Espera…" : "Entrar"}
             </Button>
           </form>
 
-          <button
-            type="button"
-            onClick={() => setMode(mode === "login" ? "register" : "login")}
-            className="mt-6 text-sm text-muted-foreground hover:text-foreground"
-          >
-            {mode === "login" ? "¿Necesitas una cuenta? Crea una" : "¿Ya tienes cuenta? Inicia sesión"}
-          </button>
-
-          {mode === "login" && (
-            <p className="mt-6 text-xs text-muted-foreground border-t border-border pt-4">
-              Cuenta demo precargada: <span className="font-mono">demo@lustre.co</span> / <span className="font-mono">demo1234</span>
-            </p>
-          )}
+          <p className="mt-6 text-xs text-muted-foreground border-t border-border pt-4">
+            Cuenta demo: usuario <span className="font-mono">admin</span> / contraseña <span className="font-mono">demo1234</span>
+          </p>
         </div>
       </div>
     </div>

@@ -226,11 +226,20 @@ function InventoryPage() {
       </div>
 
       <Dialog open={!!barcodeItem} onOpenChange={(o) => !o && setBarcodeItem(null)}>
-        <DialogContent>
+        <DialogContent
+          style={{
+            width: `clamp(320px, calc(${settings.labelWidthMm}mm + 80px), 90vw)`,
+            maxWidth: "90vw",
+            maxHeight: "90vh",
+          }}
+          className="overflow-y-auto"
+        >
           <DialogHeader><DialogTitle className="no-print">Código de barras imprimible</DialogTitle></DialogHeader>
           {barcodeItem && (
             <div className="space-y-4">
-              <BarcodeLabel item={barcodeItem} settings={settings} />
+              <div className="overflow-auto">
+                <BarcodeLabel item={barcodeItem} settings={settings} />
+              </div>
               <LabelSizeControls settings={settings} onChange={(patch) => setSettings({ ...settings, ...patch })} />
             </div>
           )}
