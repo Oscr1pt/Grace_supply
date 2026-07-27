@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useLocalStore, uid, fmtMoney } from "@/lib/storage";
+import { useSupabaseTable, uid, fmtMoney } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { InventoryItem, ItemKind } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
@@ -42,7 +42,7 @@ function genSku() {
 }
 
 function InventoryPage() {
-  const [items, setItems] = useLocalStore<InventoryItem[]>("lustre_inventory", []);
+  const { data: items, insert: insertItem, update: updateItem, remove: removeItem } = useSupabaseTable<InventoryItem>("inventory");
   const [settings, setSettings] = useSettings();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
@@ -71,23 +71,31 @@ function InventoryPage() {
     }
   };
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim() || !form.sku.trim()) { toast.error("Nombre y SKU son obligatorios"); return; }
     if (form.kind === "piedra" && !form.stone?.trim()) { toast.error("Indica el tipo de piedra"); return; }
-    if (editing) {
-      setItems(items.map((x) => (x.id === editing.id ? { ...editing, ...form } : x)));
-      toast.success("Pieza actualizada");
-    } else {
-      setItems([{ id: uid(), createdAt: new Date().toISOString(), ...form }, ...items]);
-      toast.success("Pieza agregada");
+    try {
+      if (editing) {
+        await updateItem(editing.id, form);
+        toast.success("Pieza actualizada");
+      } else {
+        await insertItem({ id: uid(), createdAt: new Date().toISOString(), ...form });
+        toast.success("Pieza agregada");
+      }
+      setOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al guardar");
     }
-    setOpen(false);
   };
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (!confirm("¿Eliminar esta pieza?")) return;
-    setItems(items.filter((x) => x.id !== id));
-    toast.success("Pieza eliminada");
+    try {
+      await removeItem(id);
+      toast.success("Pieza eliminada");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    }
   };
 
   const printBarcode = () => window.print();

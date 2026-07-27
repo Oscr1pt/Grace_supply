@@ -1,4 +1,5 @@
-import { useLocalStore } from "./storage";
+import { useCallback, useEffect, useState } from "react";
+import { supabase, fromDb, toDb } from "./supabase";
 import type { Settings } from "./types";
 
 export const defaultSettings: Settings = {
@@ -21,7 +22,31 @@ export const labelPresets = [
   { key: "grande", label: "Grande (70 × 40 mm)", widthMm: 70, heightMm: 40, barWidth: 2.6, barHeight: 65 },
 ] as const;
 
+const SETTINGS_ID = "00000000-0000-0000-0000-000000000001";
+
 export function useSettings() {
-  const [value, setValue] = useLocalStore<Settings>("lustre_settings", defaultSettings);
-  return [{ ...defaultSettings, ...value }, setValue] as const;
+  const [settings, setSettingsState] = useState<Settings>(defaultSettings);
+
+  useEffect(() => {
+    supabase
+      .from("settings")
+      .select("*")
+      .eq("id", SETTINGS_ID)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setSettingsState({ ...defaultSettings, ...fromDb<Partial<Settings>>(data as Record<string, unknown>) });
+        }
+      });
+  }, []);
+
+  const setSettings = useCallback(async (patch: Settings) => {
+    setSettingsState(patch);
+    await supabase
+      .from("settings")
+      .update(toDb(patch as unknown as Record<string, unknown>))
+      .eq("id", SETTINGS_ID);
+  }, []);
+
+  return [settings, setSettings] as const;
 }

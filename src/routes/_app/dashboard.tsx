@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useLocalStore, fmtMoney } from "@/lib/storage";
+import { useSupabaseTable, fmtMoney } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { Sale, InventoryItem, Client } from "@/lib/types";
 import { PageHeader, StatCard } from "@/components/PageHeader";
@@ -10,9 +10,9 @@ export const Route = createFileRoute("/_app/dashboard")({
 });
 
 function Dashboard() {
-  const [sales] = useLocalStore<Sale[]>("lustre_sales", []);
-  const [inventory] = useLocalStore<InventoryItem[]>("lustre_inventory", []);
-  const [clients] = useLocalStore<Client[]>("lustre_clients", []);
+  const { data: sales } = useSupabaseTable<Sale>("sales");
+  const { data: inventory } = useSupabaseTable<InventoryItem>("inventory");
+  const { data: clients } = useSupabaseTable<Client>("clients");
   const [settings] = useSettings();
 
   const totalRevenue = sales.reduce((s, x) => s + x.total, 0);

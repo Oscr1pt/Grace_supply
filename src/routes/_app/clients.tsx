@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useLocalStore, uid, fmtDate } from "@/lib/storage";
+import { useSupabaseTable, uid, fmtDate } from "@/lib/storage";
 import type { Client } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_app/clients")({
 const empty: Omit<Client, "id" | "createdAt"> = { name: "", email: "", phone: "", address: "", notes: "" };
 
 function ClientsPage() {
-  const [clients, setClients] = useLocalStore<Client[]>("lustre_clients", []);
+  const { data: clients, insert, update, remove } = useSupabaseTable<Client>("clients");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState(empty);
@@ -27,22 +27,30 @@ function ClientsPage() {
   const startNew = () => { setEditing(null); setForm(empty); setOpen(true); };
   const startEdit = (c: Client) => { setEditing(c); setForm(c); setOpen(true); };
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim()) { toast.error("El nombre es obligatorio"); return; }
-    if (editing) {
-      setClients(clients.map((c) => (c.id === editing.id ? { ...editing, ...form } : c)));
-      toast.success("Cliente actualizado");
-    } else {
-      setClients([{ id: uid(), createdAt: new Date().toISOString(), ...form }, ...clients]);
-      toast.success("Cliente agregado");
+    try {
+      if (editing) {
+        await update(editing.id, form);
+        toast.success("Cliente actualizado");
+      } else {
+        await insert({ id: uid(), createdAt: new Date().toISOString(), ...form });
+        toast.success("Cliente agregado");
+      }
+      setOpen(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al guardar");
     }
-    setOpen(false);
   };
 
-  const remove = (id: string) => {
+  const removeClient = async (id: string) => {
     if (!confirm("¿Eliminar este cliente?")) return;
-    setClients(clients.filter((c) => c.id !== id));
-    toast.success("Cliente eliminado");
+    try {
+      await remove(id);
+      toast.success("Cliente eliminado");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    }
   };
 
   const filtered = clients.filter((c) =>
@@ -107,7 +115,7 @@ function ClientsPage() {
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <Button size="icon" variant="ghost" onClick={() => startEdit(c)}><Pencil className="h-4 w-4" /></Button>
-                    <Button size="icon" variant="ghost" onClick={() => remove(c.id)}><Trash2 className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" onClick={() => removeClient(c.id)}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </td>
               </tr>

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useLocalStore, uid, fmtMoney, fmtDate } from "@/lib/storage";
+import { useSupabaseTable, uid, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { Sale, SaleLine, Client, InventoryItem } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
@@ -22,9 +22,9 @@ function genReceiptNo() {
 }
 
 function SalesPage() {
-  const [sales, setSales] = useLocalStore<Sale[]>("lustre_sales", []);
-  const [clients] = useLocalStore<Client[]>("lustre_clients", []);
-  const [inventory, setInventory] = useLocalStore<InventoryItem[]>("lustre_inventory", []);
+  const { data: sales, insert: insertSale, remove: removeSale } = useSupabaseTable<Sale>("sales");
+  const { data: clients } = useSupabaseTable<Client>("clients");
+  const { data: inventory, update: updateInventory } = useSupabaseTable<InventoryItem>("inventory");
   const [settings] = useSettings();
 
   const [open, setOpen] = useState(false);
@@ -55,30 +55,40 @@ function SalesPage() {
 
   const reset = () => { setClientId(""); setLines([]); setPickItem(""); };
 
-  const save = () => {
+  const save = async () => {
     if (!clientId) { toast.error("Selecciona un cliente"); return; }
     if (lines.length === 0) { toast.error("Agrega al menos una pieza"); return; }
-    const newInv = inventory.map((it) => {
-      const ln = lines.find((l) => l.itemId === it.id);
-      return ln ? { ...it, quantity: Math.max(0, it.quantity - ln.quantity) } : it;
-    });
-    setInventory(newInv);
-    const sale: Sale = {
-      id: uid(),
-      receiptNo: genReceiptNo(),
-      clientId, lines, subtotal, taxRate: settings.taxRate, tax, total,
-      createdAt: new Date().toISOString(),
-    };
-    setSales([sale, ...sales]);
-    toast.success("Venta registrada");
-    setOpen(false);
-    reset();
-    setViewing(sale);
+    try {
+      // Deduct inventory quantities
+      await Promise.all(
+        lines.map((ln) => {
+          const item = inventory.find((i) => i.id === ln.itemId);
+          if (item) return updateInventory(item.id, { quantity: Math.max(0, item.quantity - ln.quantity) });
+        }).filter(Boolean),
+      );
+      const sale: Sale = {
+        id: uid(),
+        receiptNo: genReceiptNo(),
+        clientId, lines, subtotal, taxRate: settings.taxRate, tax, total,
+        createdAt: new Date().toISOString(),
+      };
+      await insertSale(sale);
+      toast.success("Venta registrada");
+      setOpen(false);
+      reset();
+      setViewing(sale);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al registrar venta");
+    }
   };
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (!confirm("¿Eliminar esta venta? El inventario no se restaurará.")) return;
-    setSales(sales.filter((s) => s.id !== id));
+    try {
+      await removeSale(id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    }
   };
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name || "—";
@@ -211,7 +221,7 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
 
 function ReceiptDialog({ sale, onClose }: { sale: Sale | null; onClose: () => void }) {
   const [settings] = useSettings();
-  const [clients] = useLocalStore<Client[]>("lustre_clients", []);
+  const { data: clients } = useSupabaseTable<Client>("clients");
   if (!sale) return null;
   const client = clients.find((c) => c.id === sale.clientId);
   return (

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useLocalStore, uid, fmtMoney, fmtDate } from "@/lib/storage";
+import { useSupabaseTable, uid, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { Purchase, InventoryItem } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,28 +21,37 @@ const empty: Omit<Purchase, "id" | "createdAt" | "total"> = {
 };
 
 function PurchasesPage() {
-  const [purchases, setPurchases] = useLocalStore<Purchase[]>("lustre_purchases", []);
-  const [inventory, setInventory] = useLocalStore<InventoryItem[]>("lustre_inventory", []);
+  const { data: purchases, insert: insertPurchase, remove: removePurchase } = useSupabaseTable<Purchase>("purchases");
+  const { data: inventory, update: updateInventory } = useSupabaseTable<InventoryItem>("inventory");
   const [settings] = useSettings();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(empty);
   const [restock, setRestock] = useState(true);
 
-  const save = () => {
+  const save = async () => {
     if (!form.supplier.trim()) { toast.error("El proveedor es obligatorio"); return; }
     const total = form.quantity * form.unitCost;
-    setPurchases([{ id: uid(), createdAt: new Date().toISOString(), total, ...form }, ...purchases]);
-    if (restock && form.itemId) {
-      setInventory(inventory.map((i) => i.id === form.itemId ? { ...i, quantity: i.quantity + form.quantity } : i));
+    try {
+      await insertPurchase({ id: uid(), createdAt: new Date().toISOString(), total, ...form });
+      if (restock && form.itemId) {
+        const item = inventory.find((i) => i.id === form.itemId);
+        if (item) await updateInventory(item.id, { quantity: item.quantity + form.quantity });
+      }
+      toast.success("Compra registrada");
+      setOpen(false);
+      setForm(empty);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al registrar");
     }
-    toast.success("Compra registrada");
-    setOpen(false);
-    setForm(empty);
   };
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (!confirm("¿Eliminar esta compra?")) return;
-    setPurchases(purchases.filter((p) => p.id !== id));
+    try {
+      await removePurchase(id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    }
   };
 
   const itemName = (id?: string) => inventory.find((i) => i.id === id)?.name;
