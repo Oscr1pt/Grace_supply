@@ -1,9 +1,37 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+function getEnvVar(name: string): string | undefined {
+  if (typeof import.meta !== "undefined" && import.meta.env) {
+    if (import.meta.env[name]) return import.meta.env[name] as string;
+  }
+  if (typeof process !== "undefined" && process.env) {
+    if (process.env[name]) return process.env[name] as string;
+  }
+  return undefined;
+}
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+function sanitizeSupabaseUrl(rawUrl?: string): string {
+  if (!rawUrl) return "";
+  let url = rawUrl.trim();
+  url = url.replace(/\/+$/, "");
+  url = url.replace(/\/rest\/v1\/?$/, "");
+  return url;
+}
+
+const rawSupabaseUrl =
+  getEnvVar("VITE_SUPABASE_URL") ||
+  getEnvVar("NEXT_PUBLIC_SUPABASE_URL") ||
+  getEnvVar("SUPABASE_URL") ||
+  "";
+
+const supabaseAnonKey =
+  getEnvVar("VITE_SUPABASE_ANON_KEY") ||
+  getEnvVar("NEXT_PUBLIC_SUPABASE_ANON_KEY") ||
+  getEnvVar("SUPABASE_ANON_KEY") ||
+  "";
+
+export const supabaseUrl = sanitizeSupabaseUrl(rawSupabaseUrl);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // ─── snake_case ↔ camelCase helpers ──────────────────────────────────────────
 

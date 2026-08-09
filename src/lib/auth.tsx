@@ -67,13 +67,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUsers]);
 
   const login = useCallback(async (username: string, password: string) => {
+    const cleanUsername = username.trim();
     const { data, error } = await supabase
       .from("users")
       .select("*")
-      .ilike("username", username)
+      .ilike("username", cleanUsername)
       .eq("password", password)
       .single();
-    if (error || !data) throw new Error("Usuario o contraseña inválidos");
+
+    if (error) {
+      console.error("Supabase login error:", error);
+      if (error.code === "PGRST116" || error.details?.includes("0 rows")) {
+        throw new Error("Usuario o contraseña inválidos");
+      }
+      throw new Error(error.message || "Error al conectar con el servicio de autenticación");
+    }
+
+    if (!data) {
+      throw new Error("Usuario o contraseña inválidos");
+    }
+
     const u = toPublic(data as Record<string, unknown>);
     localStorage.setItem(SESSION_KEY, JSON.stringify(u));
     setUser(u);
