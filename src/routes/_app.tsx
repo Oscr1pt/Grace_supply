@@ -9,9 +9,11 @@ export const Route = createFileRoute("/_app")({
 const routePerms: Record<string, Permission> = {
   "/dashboard": "dashboard",
   "/clients": "clients",
+  "/suppliers": "suppliers",
   "/inventory": "inventory",
   "/sales": "sales",
   "/purchases": "purchases",
+  "/expenses": "expenses",
   "/settings": "settings",
 };
 

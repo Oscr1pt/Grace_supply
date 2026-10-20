@@ -23,23 +23,72 @@ const empty: Omit<Purchase, "id" | "createdAt" | "total"> = {
 function PurchasesPage() {
   const { data: purchases, insert: insertPurchase, remove: removePurchase } = useSupabaseTable<Purchase>("purchases");
   const { data: inventory, update: updateInventory } = useSupabaseTable<InventoryItem>("inventory");
+  const { data: suppliers } = useSupabaseTable<Supplier>("suppliers");
+  const { insert: insertSupplierCredit } = useSupabaseTable<SupplierCredit>("supplier_credits");
   const [settings] = useSettings();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(empty);
+  const [supplierId, setSupplierId] = useState("");
+  const [paymentType, setPaymentType] = useState<"contado" | "credito">("contado");
+  const [invoiceNo, setInvoiceNo] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [restock, setRestock] = useState(true);
 
   const save = async () => {
-    if (!form.supplier.trim()) { toast.error("El proveedor es obligatorio"); return; }
+    const selectedSup = suppliers.find((s) => s.id === supplierId);
+    const supplierName = selectedSup ? selectedSup.name : form.supplier.trim();
+
+    if (!supplierName) { toast.error("El proveedor es obligatorio"); return; }
     const total = form.quantity * form.unitCost;
+    const purchaseId = uid();
+    const invNo = invoiceNo.trim() || `COMP-${purchaseId.slice(0, 6).toUpperCase()}`;
+
     try {
-      await insertPurchase({ id: uid(), createdAt: new Date().toISOString(), total, ...form });
+      const purchase: Purchase = {
+        id: purchaseId,
+        createdAt: new Date().toISOString(),
+        supplier: supplierName,
+        supplierId: selectedSup?.id,
+        paymentType,
+        invoiceNo: invNo,
+        dueDate: paymentType === "credito" ? dueDate : undefined,
+        total,
+        ...form,
+      };
+
+      await insertPurchase(purchase);
+
       if (restock && form.itemId) {
         const item = inventory.find((i) => i.id === form.itemId);
         if (item) await updateInventory(item.id, { quantity: item.quantity + form.quantity });
       }
-      toast.success("Compra registrada");
+
+      // If Purchase is on Credit, automatically generate a SupplierCredit (Cuenta por Pagar)
+      if (paymentType === "credito") {
+        await insertSupplierCredit({
+          id: uid(),
+          purchaseId,
+          supplierId: selectedSup?.id,
+          supplierName,
+          invoiceNo: invNo,
+          total,
+          paid: 0,
+          balance: total,
+          status: "pendiente",
+          dueDate: dueDate || undefined,
+          createdAt: new Date().toISOString(),
+        });
+        toast.success("Compra a crédito registrada y cuenta por pagar creada");
+      } else {
+        toast.success("Compra registrada");
+      }
+
       setOpen(false);
       setForm(empty);
+      setSupplierId("");
+      setPaymentType("contado");
+      setInvoiceNo("");
+      setDueDate("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error al registrar");
     }
@@ -60,32 +109,82 @@ function PurchasesPage() {
     <div>
       <PageHeader
         title="Compras"
-        description="Reabastecimientos y gastos con proveedores."
+        description="Reabastecimientos de productos y gastos con proveedores (Contado / Crédito)."
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild><Button><Plus /> Nueva compra</Button></DialogTrigger>
-            <DialogContent>
+            <DialogTrigger asChild>
+              <Button className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                <Plus className="h-4 w-4 mr-1.5" /> Nueva compra
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Nueva compra</DialogTitle></DialogHeader>
               <div className="space-y-3">
-                <Field label="Proveedor"><Input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="Diamantes de Amberes S.A." /></Field>
-                <Field label="Pieza de inventario vinculada (opcional)">
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Proveedor registrado">
+                    <Select value={supplierId} onValueChange={(v) => {
+                      setSupplierId(v);
+                      const s = suppliers.find((x) => x.id === v);
+                      if (s) setForm({ ...form, supplier: s.name });
+                    }}>
+                      <SelectTrigger><SelectValue placeholder="Elige un proveedor" /></SelectTrigger>
+                      <SelectContent>
+                        {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} (RNC: {s.rnc || "N/A"})</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field label="Nombre del Proveedor (si no está en lista)">
+                    <Input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="Distribuidora Grace & Barber S.A." />
+                  </Field>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Método de Pago">
+                    <Select value={paymentType} onValueChange={(v) => setPaymentType(v as "contado" | "credito")}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contado">Contado (Pagado)</SelectItem>
+                        <SelectItem value="credito">Crédito (Genera Deuda)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field label="Nº Factura Proveedor">
+                    <Input value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="COMP-00249" />
+                  </Field>
+                </div>
+
+                {paymentType === "credito" && (
+                  <div className="p-3 rounded-lg border border-[#D4AF37]/40 bg-[#D4AF37]/5 space-y-1">
+                    <Label className="text-xs font-semibold text-[#D4AF37]">Fecha de vencimiento del crédito (opcional)</Label>
+                    <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-9" />
+                  </div>
+                )}
+
+                <Field label="Producto de inventario vinculado (opcional)">
                   <Select value={form.itemId || "none"} onValueChange={(v) => setForm({ ...form, itemId: v === "none" ? "" : v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">— Ninguna —</SelectItem>
+                      <SelectItem value="none">— Ninguno —</SelectItem>
                       {inventory.map((i) => <SelectItem key={i.id} value={i.id}>{i.sku} — {i.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="Descripción"><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Diamantes sueltos, 1ct VS1…" /></Field>
+
+                <Field label="Descripción de la compra">
+                  <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Pomadas mate 150ml, Tijeras profesionales 7.5'..." />
+                </Field>
+
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Cantidad"><Input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: +e.target.value })} /></Field>
-                  <Field label="Costo unitario"><Input type="number" step="0.01" value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: +e.target.value })} /></Field>
+                  <Field label="Cantidad"><Input type="number" min={1} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Math.max(1, +e.target.value) })} /></Field>
+                  <Field label="Costo unitario"><Input type="number" step="0.01" value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: Math.max(0, +e.target.value) })} /></Field>
                 </div>
+
                 {form.itemId && (
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
                     <input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} />
-                    Aumentar existencia de la pieza vinculada en {form.quantity}
+                    Sumar automáticamente {form.quantity} unidad(es) al stock del producto
                   </label>
                 )}
                 <div className="text-right text-sm">
@@ -94,7 +193,7 @@ function PurchasesPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-                <Button onClick={save}>Registrar compra</Button>
+                <Button onClick={save} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">Registrar compra</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -106,7 +205,7 @@ function PurchasesPage() {
           <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="text-left px-4 py-3">Proveedor</th>
-              <th className="text-left px-4 py-3">Pieza / descripción</th>
+              <th className="text-left px-4 py-3">Producto / descripción</th>
               <th className="text-left px-4 py-3">Fecha</th>
               <th className="text-right px-4 py-3">Cant.</th>
               <th className="text-right px-4 py-3">Total</th>

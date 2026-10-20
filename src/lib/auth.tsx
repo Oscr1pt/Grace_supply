@@ -4,9 +4,11 @@ import { supabase } from "./supabase";
 export const PERMISSIONS = [
   { key: "dashboard", label: "Panel" },
   { key: "clients", label: "Clientes" },
+  { key: "suppliers", label: "Proveedores" },
   { key: "inventory", label: "Inventario" },
   { key: "sales", label: "Ventas" },
   { key: "purchases", label: "Compras" },
+  { key: "expenses", label: "Gastos" },
   { key: "settings", label: "Ajustes" },
 ] as const;
 

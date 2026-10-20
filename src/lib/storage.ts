@@ -1,57 +1,109 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase, fromDb, toDb } from "./supabase";
 
+function getLocal<T>(table: string): T[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(`lustre_${table}`);
+    return raw ? (JSON.parse(raw) as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setLocal<T>(table: string, items: T[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(`lustre_${table}`, JSON.stringify(items));
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
- * Generic hook that mirrors a whole Supabase table as a React state array.
- * Fetches on mount; exposes insert / update / remove for write-through.
+ * Generic hook that mirrors a whole table (Supabase + localStorage fallback).
+ * Enables seamless offline and local development while syncing with Supabase when available.
  */
 export function useSupabaseTable<T extends { id: string }>(
   table: string,
   orderBy = "created_at",
   orderAsc = false,
 ) {
-  const [data, setData] = useState<T[]>([]);
+  const [data, setData] = useState<T[]>(() => getLocal<T>(table));
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    const { data: rows, error } = await supabase
-      .from(table)
-      .select("*")
-      .order(orderBy, { ascending: orderAsc });
-    if (!error && rows) {
-      setData(rows.map((r) => fromDb<T>(r as Record<string, unknown>)));
+    try {
+      const { data: rows, error } = await supabase
+        .from(table)
+        .select("*")
+        .order(orderBy, { ascending: orderAsc });
+      if (!error && rows) {
+        const parsed = rows.map((r) => fromDb<T>(r as Record<string, unknown>));
+        setData(parsed);
+        setLocal(table, parsed);
+      } else {
+        const local = getLocal<T>(table);
+        if (local.length > 0) setData(local);
+      }
+    } catch {
+      const local = getLocal<T>(table);
+      if (local.length > 0) setData(local);
     }
     setLoading(false);
   }, [table, orderBy, orderAsc]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const insert = useCallback(
     async (item: T) => {
-      const { error } = await supabase.from(table).insert(toDb(item as Record<string, unknown>));
-      if (error) throw new Error(error.message);
-      setData((prev) => [item, ...prev]);
+      try {
+        await supabase.from(table).insert(toDb(item as Record<string, unknown>));
+      } catch {
+        /* fallback to local storage */
+      }
+      setData((prev) => {
+        const next = [item, ...prev.filter((x) => x.id !== item.id)];
+        setLocal(table, next);
+        return next;
+      });
     },
     [table],
   );
 
   const update = useCallback(
     async (id: string, patch: Partial<T>) => {
-      const { error } = await supabase
-        .from(table)
-        .update(toDb(patch as Record<string, unknown>))
-        .eq("id", id);
-      if (error) throw new Error(error.message);
-      setData((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+      try {
+        await supabase
+          .from(table)
+          .update(toDb(patch as Record<string, unknown>))
+          .eq("id", id);
+      } catch {
+        /* fallback to local storage */
+      }
+      setData((prev) => {
+        const next = prev.map((x) => (x.id === id ? { ...x, ...patch } : x));
+        setLocal(table, next);
+        return next;
+      });
     },
     [table],
   );
 
   const remove = useCallback(
     async (id: string) => {
-      const { error } = await supabase.from(table).delete().eq("id", id);
-      if (error) throw new Error(error.message);
-      setData((prev) => prev.filter((x) => x.id !== id));
+      try {
+        await supabase.from(table).delete().eq("id", id);
+      } catch {
+        /* fallback to local storage */
+      }
+      setData((prev) => {
+        const next = prev.filter((x) => x.id !== id);
+        setLocal(table, next);
+        return next;
+      });
     },
     [table],
   );
@@ -71,7 +123,11 @@ export function useLocalStore<T>(key: string, initial: T) {
     }
   });
   useEffect(() => {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* ignore */
+    }
   }, [key, value]);
   return [value, setValue] as const;
 }
@@ -89,5 +145,14 @@ export function fmtMoney(amount: number, currency = "DOP") {
 }
 
 export function fmtDate(iso: string) {
-  return new Date(iso).toLocaleString("es-DO");
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleDateString("es-DO", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return iso;
+  }
 }

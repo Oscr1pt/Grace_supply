@@ -25,12 +25,15 @@ function SalesPage() {
   const { data: sales, insert: insertSale, remove: removeSale } = useSupabaseTable<Sale>("sales");
   const { data: clients } = useSupabaseTable<Client>("clients");
   const { data: inventory, update: updateInventory } = useSupabaseTable<InventoryItem>("inventory");
+  const { insert: insertClientCredit } = useSupabaseTable<ClientCredit>("client_credits");
   const [settings] = useSettings();
 
   const [open, setOpen] = useState(false);
   const [clientId, setClientId] = useState("");
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [pickItem, setPickItem] = useState("");
+  const [paymentType, setPaymentType] = useState<"contado" | "credito">("contado");
+  const [dueDate, setDueDate] = useState<string>("");
   const [viewing, setViewing] = useState<Sale | null>(null);
 
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
@@ -53,11 +56,17 @@ function SalesPage() {
   const removeLine = (id: string) => setLines(lines.filter((l) => l.itemId !== id));
   const setQty = (id: string, q: number) => setLines(lines.map((l) => l.itemId === id ? { ...l, quantity: Math.max(1, q) } : l));
 
-  const reset = () => { setClientId(""); setLines([]); setPickItem(""); };
+  const reset = () => {
+    setClientId("");
+    setLines([]);
+    setPickItem("");
+    setPaymentType("contado");
+    setDueDate("");
+  };
 
   const save = async () => {
     if (!clientId) { toast.error("Selecciona un cliente"); return; }
-    if (lines.length === 0) { toast.error("Agrega al menos una pieza"); return; }
+    if (lines.length === 0) { toast.error("Agrega al menos un producto"); return; }
     try {
       // Deduct inventory quantities
       await Promise.all(
@@ -66,14 +75,43 @@ function SalesPage() {
           if (item) return updateInventory(item.id, { quantity: Math.max(0, item.quantity - ln.quantity) });
         }).filter(Boolean),
       );
+
+      const saleId = uid();
+      const receiptNo = genReceiptNo();
       const sale: Sale = {
-        id: uid(),
-        receiptNo: genReceiptNo(),
-        clientId, lines, subtotal, taxRate: settings.taxRate, tax, total,
+        id: saleId,
+        receiptNo,
+        clientId,
+        lines,
+        subtotal,
+        taxRate: settings.taxRate,
+        tax,
+        total,
+        paymentType,
+        dueDate: paymentType === "credito" ? dueDate : undefined,
         createdAt: new Date().toISOString(),
       };
       await insertSale(sale);
-      toast.success("Venta registrada");
+
+      // If sale is on Credit, automatically generate a ClientCredit (Cuenta por Cobrar)
+      if (paymentType === "credito") {
+        await insertClientCredit({
+          id: uid(),
+          saleId,
+          clientId,
+          receiptNo,
+          total,
+          paid: 0,
+          balance: total,
+          status: "pendiente",
+          dueDate: dueDate || undefined,
+          createdAt: new Date().toISOString(),
+        });
+        toast.success("Venta a crédito registrada y cuenta por cobrar creada");
+      } else {
+        toast.success("Venta registrada");
+      }
+
       setOpen(false);
       reset();
       setViewing(sale);
@@ -97,42 +135,69 @@ function SalesPage() {
     <div>
       <PageHeader
         title="Ventas"
-        description="Emite recibos y controla los ingresos."
+        description="Emite recibos, controla ingresos y registra ventas a contado o crédito."
         actions={
           <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
             <DialogTrigger asChild>
-              <Button><Plus /> Nueva venta</Button>
+              <Button className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                <Plus className="h-4 w-4 mr-1.5" /> Nueva venta
+              </Button>
             </DialogTrigger>
             <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
               <DialogHeader><DialogTitle>Nueva venta</DialogTitle></DialogHeader>
               <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label>Cliente</Label>
-                  <Select value={clientId} onValueChange={setClientId}>
-                    <SelectTrigger><SelectValue placeholder={clients.length ? "Elige un cliente" : "Agrega primero un cliente"} /></SelectTrigger>
-                    <SelectContent>{clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Cliente</Label>
+                    <Select value={clientId} onValueChange={setClientId}>
+                      <SelectTrigger><SelectValue placeholder={clients.length ? "Elige un cliente" : "Agrega primero un cliente"} /></SelectTrigger>
+                      <SelectContent>{clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Método de Pago</Label>
+                    <Select value={paymentType} onValueChange={(v) => setPaymentType(v as "contado" | "credito")}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contado">Contado (Inmediato)</SelectItem>
+                        <SelectItem value="credito">Crédito (Genera Deuda)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
+
+                {paymentType === "credito" && (
+                  <div className="p-3 rounded-lg border border-[#D4AF37]/40 bg-[#D4AF37]/5 space-y-2">
+                    <div className="text-xs font-semibold text-[#D4AF37] uppercase tracking-wider">
+                      Venta a Crédito — Cuenta por Cobrar
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Fecha de vencimiento (opcional)</Label>
+                      <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-9" />
+                    </div>
+                  </div>
+                )}
 
                 <div className="rounded-md border border-border">
                   <div className="p-3 flex gap-2 border-b border-border bg-muted/30">
                     <Select value={pickItem} onValueChange={setPickItem}>
-                      <SelectTrigger className="flex-1"><SelectValue placeholder="Selecciona pieza para agregar" /></SelectTrigger>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Selecciona producto para agregar" /></SelectTrigger>
                       <SelectContent>
                         {inventory.filter((i) => i.quantity > 0).map((i) => (
                           <SelectItem key={i.id} value={i.id}>{i.sku} — {i.name} ({fmtMoney(i.price, settings.currency)})</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <Button onClick={addLine} disabled={!pickItem}><Plus /> Agregar</Button>
+                    <Button onClick={addLine} disabled={!pickItem} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0"><Plus /> Agregar</Button>
                   </div>
                   {lines.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-muted-foreground">Sin piezas agregadas.</div>
+                    <div className="p-8 text-center text-sm text-muted-foreground">Sin productos agregados.</div>
                   ) : (
                     <table className="w-full text-sm">
                       <thead className="text-xs uppercase tracking-wider text-muted-foreground">
                         <tr>
-                          <th className="text-left px-3 py-2">Pieza</th>
+                          <th className="text-left px-3 py-2">Producto</th>
                           <th className="text-right px-3 py-2 w-24">Precio</th>
                           <th className="text-right px-3 py-2 w-20">Cant.</th>
                           <th className="text-right px-3 py-2 w-28">Total</th>
@@ -165,7 +230,7 @@ function SalesPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-                <Button onClick={save}>Registrar venta y generar recibo</Button>
+                <Button onClick={save} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">Registrar venta</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

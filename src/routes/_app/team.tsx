@@ -59,7 +59,9 @@ function TeamPage() {
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button><Plus /> Nuevo empleado</Button>
+              <Button className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                <Plus className="h-4 w-4 mr-1.5" /> Nuevo empleado
+              </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>Nuevo empleado</DialogTitle></DialogHeader>

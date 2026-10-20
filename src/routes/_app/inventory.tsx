@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Pencil, Trash2, Barcode as BarcodeIcon, Printer, Search, Gem, Package } from "lucide-react";
+import { Plus, Pencil, Trash2, Barcode as BarcodeIcon, Printer, Search, Scissors, Package, Sparkles } from "lucide-react";
 
 import { BarcodeLabel, LabelSizeControls } from "@/components/BarcodeLabel";
 import { toast } from "sonner";
@@ -18,27 +18,41 @@ export const Route = createFileRoute("/_app/inventory")({
   component: InventoryPage,
 });
 
-const joyaCategories: InventoryItem["category"][] = ["anillo", "collar", "pulsera", "arete", "dije", "reloj", "otro"];
+const barberCategories: InventoryItem["category"][] = ["anillo", "collar", "pulsera", "arete", "dije", "reloj", "otro"];
 
 const categoryLabels: Record<InventoryItem["category"], string> = {
-  anillo: "Anillo",
-  collar: "Collar",
-  pulsera: "Pulsera",
-  arete: "Arete",
-  dije: "Dije",
-  reloj: "Reloj",
-  piedra: "Piedra suelta",
-  otro: "Otro",
+  anillo: "Herramientas & Máquinas",
+  collar: "Cuidado Capilar",
+  pulsera: "Cuidado de Barba",
+  arete: "Estética & Piel",
+  dije: "Ceras & Pomadas",
+  reloj: "Accesorios & Consumibles",
+  piedra: "Insumo / Repuesto",
+  otro: "Otro Producto",
 };
 
 const emptyForm: Omit<InventoryItem, "id" | "createdAt"> = {
-  sku: "", kind: "joya", name: "", category: "anillo", metal: "Oro amarillo", karat: "18K",
-  weightGrams: 0, stone: "", stoneCarats: 0, stoneCut: "", stoneClarity: "", stoneColor: "",
-  sizeMm: 0, sizeLabel: "", costPrice: 0, price: 0, quantity: 1,
+  sku: "",
+  kind: "joya",
+  name: "",
+  category: "anillo",
+  metal: "Marca / Fabricante",
+  karat: "Presentación (ej. 250ml / 8.5oz)",
+  weightGrams: 0,
+  stone: "",
+  stoneCarats: 0,
+  stoneCut: "",
+  stoneClarity: "",
+  stoneColor: "",
+  sizeMm: 0,
+  sizeLabel: "",
+  costPrice: 0,
+  price: 0,
+  quantity: 1,
 };
 
 function genSku() {
-  return "JOY-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+  return "GS-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
 function InventoryPage() {
@@ -50,7 +64,12 @@ function InventoryPage() {
   const [q, setQ] = useState("");
   const [barcodeItem, setBarcodeItem] = useState<InventoryItem | null>(null);
 
-  const startNew = () => { setEditing(null); setForm({ ...emptyForm, sku: genSku() }); setOpen(true); };
+  const startNew = () => {
+    setEditing(null);
+    setForm({ ...emptyForm, sku: genSku(), metal: "", karat: "" });
+    setOpen(true);
+  };
+
   const startEdit = (i: InventoryItem) => {
     setEditing(i);
     setForm({ ...emptyForm, ...i, kind: i.kind || "joya" });
@@ -65,22 +84,22 @@ function InventoryPage() {
         ...form,
         kind,
         category: form.category === "piedra" ? "anillo" : form.category,
-        metal: form.metal || "Oro amarillo",
-        karat: form.karat || "18K",
       });
     }
   };
 
   const save = async () => {
-    if (!form.name.trim() || !form.sku.trim()) { toast.error("Nombre y SKU son obligatorios"); return; }
-    if (form.kind === "piedra" && !form.stone?.trim()) { toast.error("Indica el tipo de piedra"); return; }
+    if (!form.name.trim() || !form.sku.trim()) {
+      toast.error("Nombre y SKU son obligatorios");
+      return;
+    }
     try {
       if (editing) {
         await updateItem(editing.id, form);
-        toast.success("Pieza actualizada");
+        toast.success("Producto actualizado");
       } else {
         await insertItem({ id: uid(), createdAt: new Date().toISOString(), ...form });
-        toast.success("Pieza agregada");
+        toast.success("Producto agregado");
       }
       setOpen(false);
     } catch (e) {
@@ -89,10 +108,10 @@ function InventoryPage() {
   };
 
   const remove = async (id: string) => {
-    if (!confirm("¿Eliminar esta pieza?")) return;
+    if (!confirm("¿Eliminar este producto del inventario?")) return;
     try {
       await removeItem(id);
-      toast.success("Pieza eliminada");
+      toast.success("Producto eliminado");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error al eliminar");
     }
@@ -101,77 +120,152 @@ function InventoryPage() {
   const printBarcode = () => window.print();
 
   const filtered = items.filter((i) =>
-    [i.name, i.sku, i.metal, i.stone].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase()),
+    [i.name, i.sku, i.metal, i.stone, categoryLabels[i.category]].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase()),
   );
 
-  const isStone = form.kind === "piedra";
+  const isInsumo = form.kind === "piedra";
 
   return (
     <div>
       <PageHeader
-        title="Inventario"
-        description="Joyas terminadas y piedras sueltas para montar."
+        title="Inventario de Productos"
+        description="Catálogo de productos de barbería, estética, cuidado de barba, herramientas y accesorios."
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button onClick={startNew}><Plus /> Nueva pieza</Button>
+              <Button onClick={startNew} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                <Plus className="h-4 w-4 mr-1.5" /> Nuevo producto
+              </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>{editing ? "Editar pieza" : "Nueva pieza de inventario"}</DialogTitle></DialogHeader>
+              <DialogHeader>
+                <DialogTitle>{editing ? "Editar producto" : "Nuevo producto de inventario"}</DialogTitle>
+              </DialogHeader>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-2">
-                  <KindCard active={form.kind === "joya"} onClick={() => setKind("joya")} icon={<Package className="h-4 w-4" />} title="Joya completa" hint="Pieza terminada con metal" />
-                  <KindCard active={form.kind === "piedra"} onClick={() => setKind("piedra")} icon={<Gem className="h-4 w-4" />} title="Piedra suelta" hint="Gema sin montar" />
+                  <KindCard
+                    active={form.kind === "joya"}
+                    onClick={() => setKind("joya")}
+                    icon={<Package className="h-4 w-4" />}
+                    title="Producto Terminado"
+                    hint="Artículo para venta directa"
+                  />
+                  <KindCard
+                    active={form.kind === "piedra"}
+                    onClick={() => setKind("piedra")}
+                    icon={<Scissors className="h-4 w-4" />}
+                    title="Insumo / Repuesto"
+                    hint="Consumible o accesorio de uso interno"
+                  />
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
-                  <Field label="SKU / Código de barras"><Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} /></Field>
-                  <Field label="Nombre" className="col-span-2"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={isStone ? "Diamante 1ct VS1" : "Anillo solitario 1ct"} /></Field>
+                  <Field label="SKU / Código de barras">
+                    <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+                  </Field>
+                  <Field label="Nombre del producto" className="col-span-2">
+                    <Input
+                      value={form.name}
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      placeholder={isInsumo ? "Cuchillas de Repuesto Wahl 5-Star" : "Cera Pomada Mate Grace Supply 150ml"}
+                    />
+                  </Field>
                 </div>
 
-                {!isStone && (
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Categoría">
+                    <Select
+                      value={form.category}
+                      onValueChange={(v) => setForm({ ...form, category: v as InventoryItem["category"] })}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {barberCategories.map((c) => (
+                          <SelectItem key={c} value={c}>
+                            {categoryLabels[c]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Marca / Fabricante">
+                    <Input
+                      value={form.metal || ""}
+                      onChange={(e) => setForm({ ...form, metal: e.target.value })}
+                      placeholder="Grace Supply, Wahl, BaByliss"
+                    />
+                  </Field>
+                  <Field label="Presentación / Tamaño">
+                    <Input
+                      value={form.karat || ""}
+                      onChange={(e) => setForm({ ...form, karat: e.target.value })}
+                      placeholder="250ml, 8.5 oz, N/A"
+                    />
+                  </Field>
+                </div>
+
+                <div className="rounded-lg border border-border/80 p-3 space-y-3 bg-muted/20">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Detalles adicionales
+                  </div>
                   <div className="grid grid-cols-3 gap-3">
-                    <Field label="Categoría">
-                      <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v as InventoryItem["category"] })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>{joyaCategories.map((c) => <SelectItem key={c} value={c}>{categoryLabels[c]}</SelectItem>)}</SelectContent>
-                      </Select>
+                    <Field label="Especificación / Tipo">
+                      <Input
+                        value={form.stone || ""}
+                        onChange={(e) => setForm({ ...form, stone: e.target.value })}
+                        placeholder="ej. Fijación Fuerte / Aceite de Argán"
+                      />
                     </Field>
-                    <Field label="Metal"><Input value={form.metal || ""} onChange={(e) => setForm({ ...form, metal: e.target.value })} placeholder="Oro amarillo" /></Field>
-                    <Field label="Quilates / Pureza"><Input value={form.karat || ""} onChange={(e) => setForm({ ...form, karat: e.target.value })} placeholder="18K, 925" /></Field>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-3 gap-3">
-                  <Field label="Peso (g)"><Input type="number" step="0.01" value={form.weightGrams || ""} onChange={(e) => setForm({ ...form, weightGrams: +e.target.value })} /></Field>
-                  {!isStone && <>
-                    <Field label="Tamaño (mm)"><Input type="number" step="0.1" value={form.sizeMm || ""} onChange={(e) => setForm({ ...form, sizeMm: +e.target.value })} /></Field>
-                    <Field label="Talla"><Input value={form.sizeLabel || ""} onChange={(e) => setForm({ ...form, sizeLabel: e.target.value })} placeholder="MX 7 / 18 cm" /></Field>
-                  </>}
-                </div>
-
-                <div className="rounded-md border border-border p-3 space-y-3 bg-muted/30">
-                  <div className="text-xs uppercase tracking-wider text-muted-foreground">Detalles de la piedra {isStone && <span className="text-destructive">*</span>}</div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <Field label="Piedra"><Input value={form.stone || ""} onChange={(e) => setForm({ ...form, stone: e.target.value })} placeholder="Diamante" /></Field>
-                    <Field label="Quilates (ct)"><Input type="number" step="0.01" value={form.stoneCarats || ""} onChange={(e) => setForm({ ...form, stoneCarats: +e.target.value })} /></Field>
-                    <Field label="Corte"><Input value={form.stoneCut || ""} onChange={(e) => setForm({ ...form, stoneCut: e.target.value })} placeholder="Brillante redondo" /></Field>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Claridad"><Input value={form.stoneClarity || ""} onChange={(e) => setForm({ ...form, stoneClarity: e.target.value })} placeholder="VS1" /></Field>
-                    <Field label="Color"><Input value={form.stoneColor || ""} onChange={(e) => setForm({ ...form, stoneColor: e.target.value })} placeholder="F" /></Field>
+                    <Field label="Contenido (ml/g/unid)">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={form.stoneCarats || ""}
+                        onChange={(e) => setForm({ ...form, stoneCarats: +e.target.value })}
+                        placeholder="250"
+                      />
+                    </Field>
+                    <Field label="Acabado / Variante">
+                      <Input
+                        value={form.stoneCut || ""}
+                        onChange={(e) => setForm({ ...form, stoneCut: e.target.value })}
+                        placeholder="Efecto Mate / Brillo Medio"
+                      />
+                    </Field>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
-                  <Field label="Costo"><Input type="number" step="0.01" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: +e.target.value })} /></Field>
-                  <Field label="Precio venta"><Input type="number" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: +e.target.value })} /></Field>
-                  <Field label="Cantidad"><Input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: +e.target.value })} /></Field>
+                  <Field label="Costo de compra">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={form.costPrice}
+                      onChange={(e) => setForm({ ...form, costPrice: +e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Precio de venta">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={form.price}
+                      onChange={(e) => setForm({ ...form, price: +e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Existencia (Stock)">
+                    <Input
+                      type="number"
+                      value={form.quantity}
+                      onChange={(e) => setForm({ ...form, quantity: +e.target.value })}
+                    />
+                  </Field>
                 </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-                <Button onClick={save}>{editing ? "Guardar cambios" : "Agregar pieza"}</Button>
+                <Button onClick={save} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                  {editing ? "Guardar cambios" : "Agregar producto"}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -180,55 +274,92 @@ function InventoryPage() {
 
       <div className="relative mb-4 max-w-sm">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Buscar por nombre, SKU, piedra…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
+        <Input
+          placeholder="Buscar por nombre, SKU, marca, categoría…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          className="pl-9"
+        />
       </div>
 
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
+          <thead className="bg-muted/60 text-xs uppercase tracking-wider text-muted-foreground font-semibold">
             <tr>
-              <th className="text-left px-4 py-3">SKU</th>
-              <th className="text-left px-4 py-3">Pieza</th>
-              <th className="text-left px-4 py-3">Especificaciones</th>
-              <th className="text-right px-4 py-3">Precio</th>
-              <th className="text-right px-4 py-3">Cant.</th>
-              <th className="px-4 py-3 w-32"></th>
+              <th className="text-left px-4 py-3.5">SKU</th>
+              <th className="text-left px-4 py-3.5">Producto</th>
+              <th className="text-left px-4 py-3.5">Detalles / Marca</th>
+              <th className="text-right px-4 py-3.5">Precio</th>
+              <th className="text-right px-4 py-3.5">Stock</th>
+              <th className="px-4 py-3.5 w-32"></th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-border/60">
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-12 text-muted-foreground">Aún no hay inventario.</td></tr>
-            ) : filtered.map((i) => {
-              const stone = i.kind === "piedra";
-              return (
-                <tr key={i.id} className="border-t border-border hover:bg-muted/30">
-                  <td className="px-4 py-3 font-mono text-xs">{i.sku}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium flex items-center gap-2">
-                      {stone && <Gem className="h-3.5 w-3.5 text-primary" />}
-                      {i.name}
-                    </div>
-                    <div className="text-xs text-muted-foreground">{categoryLabels[i.category] || i.category}</div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {stone
-                      ? `${i.stone || "Piedra"} ${i.stoneCarats || 0}ct${i.stoneCut ? ` · ${i.stoneCut}` : ""}${i.stoneClarity ? ` · ${i.stoneClarity}` : ""}`
-                      : `${i.karat || ""} ${i.metal || ""}${i.weightGrams ? ` · ${i.weightGrams}g` : ""}${i.stone ? ` · ${i.stone} ${i.stoneCarats || 0}ct` : ""}${i.sizeLabel ? ` · ${i.sizeLabel}` : ""}`}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono">{fmtMoney(i.price, settings.currency)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className={i.quantity <= 1 ? "text-destructive font-medium" : ""}>{i.quantity}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
-                      <Button size="icon" variant="ghost" onClick={() => setBarcodeItem(i)} title="Código de barras"><BarcodeIcon className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" onClick={() => startEdit(i)}><Pencil className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" onClick={() => remove(i.id)}><Trash2 className="h-4 w-4" /></Button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+              <tr>
+                <td colSpan={6} className="text-center py-12 text-muted-foreground">
+                  Aún no hay productos registrados en el inventario.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((i) => {
+                const isConsumable = i.kind === "piedra";
+                return (
+                  <tr key={i.id} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3.5 font-mono text-xs font-semibold text-muted-foreground">{i.sku}</td>
+                    <td className="px-4 py-3.5">
+                      <div className="font-medium text-foreground flex items-center gap-2">
+                        {isConsumable ? <Scissors className="h-3.5 w-3.5 text-[#D4AF37]" /> : <Package className="h-3.5 w-3.5 text-muted-foreground" />}
+                        {i.name}
+                      </div>
+                      <div className="text-xs text-[#D4AF37] font-medium mt-0.5">
+                        {categoryLabels[i.category] || i.category}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 text-xs text-muted-foreground">
+                      {[i.metal, i.karat, i.stone, i.stoneCut].filter(Boolean).join(" · ") || "Estándar"}
+                    </td>
+                    <td className="px-4 py-3.5 text-right font-mono font-semibold text-foreground">
+                      {fmtMoney(i.price, settings.currency)}
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium ${i.quantity <= 1 ? "bg-destructive/10 text-destructive border border-destructive/20" : "bg-muted text-foreground"}`}>
+                        {i.quantity}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setBarcodeItem(i)}
+                          title="Código de barras"
+                          className="hover:text-[#D4AF37]"
+                        >
+                          <BarcodeIcon className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => startEdit(i)}
+                          className="hover:text-[#D4AF37]"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => remove(i.id)}
+                          className="hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -242,7 +373,9 @@ function InventoryPage() {
           }}
           className="overflow-y-auto"
         >
-          <DialogHeader><DialogTitle className="no-print">Código de barras imprimible</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="no-print">Código de barras imprimible</DialogTitle>
+          </DialogHeader>
           {barcodeItem && (
             <div className="space-y-4">
               <div className="overflow-auto">
@@ -253,7 +386,9 @@ function InventoryPage() {
           )}
           <DialogFooter className="no-print">
             <Button variant="outline" onClick={() => setBarcodeItem(null)}>Cerrar</Button>
-            <Button onClick={printBarcode}><Printer /> Imprimir</Button>
+            <Button onClick={printBarcode} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+              <Printer className="h-4 w-4 mr-1.5" /> Imprimir
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -262,7 +397,7 @@ function InventoryPage() {
 }
 
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
-  return <div className={`space-y-1.5 ${className || ""}`}><Label>{label}</Label>{children}</div>;
+  return <div className={`space-y-1.5 ${className || ""}`}><Label className="text-xs font-medium text-neutral-300">{label}</Label>{children}</div>;
 }
 
 function KindCard({ active, onClick, icon, title, hint }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; hint: string }) {
@@ -270,9 +405,16 @@ function KindCard({ active, onClick, icon, title, hint }: { active: boolean; onC
     <button
       type="button"
       onClick={onClick}
-      className={`text-left rounded-md border p-3 transition-colors ${active ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
+      className={`text-left rounded-lg border p-3 transition-all ${
+        active
+          ? "border-[#D4AF37] bg-[#D4AF37]/10 text-foreground shadow-sm shadow-[#D4AF37]/10"
+          : "border-border hover:border-[#D4AF37]/50 text-muted-foreground"
+      }`}
     >
-      <div className="flex items-center gap-2 text-sm font-medium">{icon}{title}</div>
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <span className={active ? "text-[#D4AF37]" : ""}>{icon}</span>
+        {title}
+      </div>
       <div className="text-xs text-muted-foreground mt-0.5">{hint}</div>
     </button>
   );

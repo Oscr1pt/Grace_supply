@@ -3,7 +3,7 @@ import { supabase, fromDb, toDb } from "./supabase";
 import type { Settings } from "./types";
 
 export const defaultSettings: Settings = {
-  businessName: "IMPERIO GOLD JOYERIA",
+  businessName: "GRACE SUPPLY",
   businessAddress: "Santo Domingo, República Dominicana",
   businessPhone: "+1 (809) 000-0000",
   taxRate: 18,
@@ -16,7 +16,7 @@ export const defaultSettings: Settings = {
 };
 
 export const labelPresets = [
-  { key: "joyeria", label: "Etiqueta joyería (25 × 12 mm)", widthMm: 25, heightMm: 12, barWidth: 1, barHeight: 22 },
+  { key: "joyeria", label: "Etiqueta pequeña (25 × 12 mm)", widthMm: 25, heightMm: 12, barWidth: 1, barHeight: 22 },
   { key: "pequena", label: "Pequeña (38 × 19 mm)", widthMm: 38, heightMm: 19, barWidth: 1.4, barHeight: 32 },
   { key: "mediana", label: "Mediana (50 × 30 mm)", widthMm: 50, heightMm: 30, barWidth: 2, barHeight: 50 },
   { key: "grande", label: "Grande (70 × 40 mm)", widthMm: 70, heightMm: 40, barWidth: 2.6, barHeight: 65 },

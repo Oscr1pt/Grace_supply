@@ -14,10 +14,12 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppClientsRouteImport } from './routes/_app/clients'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppExpensesRouteImport } from './routes/_app/expenses'
 import { Route as AppInventoryRouteImport } from './routes/_app/inventory'
 import { Route as AppPurchasesRouteImport } from './routes/_app/purchases'
 import { Route as AppSalesRouteImport } from './routes/_app/sales'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppSuppliersRouteImport } from './routes/_app/suppliers'
 import { Route as AppTeamRouteImport } from './routes/_app/team'
 
 const IndexRoute = IndexRouteImport.update({
@@ -44,6 +46,11 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppExpensesRoute = AppExpensesRouteImport.update({
+  id: '/expenses',
+  path: '/expenses',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppInventoryRoute = AppInventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
@@ -64,6 +71,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSuppliersRoute = AppSuppliersRouteImport.update({
+  id: '/suppliers',
+  path: '/suppliers',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppTeamRoute = AppTeamRouteImport.update({
   id: '/team',
   path: '/team',
@@ -75,10 +87,12 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/clients': typeof AppClientsRoute
   '/dashboard': typeof AppDashboardRoute
+  '/expenses': typeof AppExpensesRoute
   '/inventory': typeof AppInventoryRoute
   '/purchases': typeof AppPurchasesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
+  '/suppliers': typeof AppSuppliersRoute
   '/team': typeof AppTeamRoute
 }
 export interface FileRoutesByTo {
@@ -86,10 +100,12 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/clients': typeof AppClientsRoute
   '/dashboard': typeof AppDashboardRoute
+  '/expenses': typeof AppExpensesRoute
   '/inventory': typeof AppInventoryRoute
   '/purchases': typeof AppPurchasesRoute
   '/sales': typeof AppSalesRoute
   '/settings': typeof AppSettingsRoute
+  '/suppliers': typeof AppSuppliersRoute
   '/team': typeof AppTeamRoute
 }
 export interface FileRoutesById {
@@ -99,10 +115,12 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_app/clients': typeof AppClientsRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/expenses': typeof AppExpensesRoute
   '/_app/inventory': typeof AppInventoryRoute
   '/_app/purchases': typeof AppPurchasesRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/settings': typeof AppSettingsRoute
+  '/_app/suppliers': typeof AppSuppliersRoute
   '/_app/team': typeof AppTeamRoute
 }
 export interface FileRouteTypes {
@@ -112,10 +130,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/clients'
     | '/dashboard'
+    | '/expenses'
     | '/inventory'
     | '/purchases'
     | '/sales'
     | '/settings'
+    | '/suppliers'
     | '/team'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -123,10 +143,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/clients'
     | '/dashboard'
+    | '/expenses'
     | '/inventory'
     | '/purchases'
     | '/sales'
     | '/settings'
+    | '/suppliers'
     | '/team'
   id:
     | '__root__'
@@ -135,10 +157,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/_app/clients'
     | '/_app/dashboard'
+    | '/_app/expenses'
     | '/_app/inventory'
     | '/_app/purchases'
     | '/_app/sales'
     | '/_app/settings'
+    | '/_app/suppliers'
     | '/_app/team'
   fileRoutesById: FileRoutesById
 }
@@ -185,6 +209,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/expenses': {
+      id: '/_app/expenses'
+      path: '/expenses'
+      fullPath: '/expenses'
+      preLoaderRoute: typeof AppExpensesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/inventory': {
       id: '/_app/inventory'
       path: '/inventory'
@@ -213,6 +244,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/suppliers': {
+      id: '/_app/suppliers'
+      path: '/suppliers'
+      fullPath: '/suppliers'
+      preLoaderRoute: typeof AppSuppliersRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/team': {
       id: '/_app/team'
       path: '/team'
@@ -226,20 +264,24 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppClientsRoute: typeof AppClientsRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppExpensesRoute: typeof AppExpensesRoute
   AppInventoryRoute: typeof AppInventoryRoute
   AppPurchasesRoute: typeof AppPurchasesRoute
   AppSalesRoute: typeof AppSalesRoute
   AppSettingsRoute: typeof AppSettingsRoute
+  AppSuppliersRoute: typeof AppSuppliersRoute
   AppTeamRoute: typeof AppTeamRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppClientsRoute: AppClientsRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppExpensesRoute: AppExpensesRoute,
   AppInventoryRoute: AppInventoryRoute,
   AppPurchasesRoute: AppPurchasesRoute,
   AppSalesRoute: AppSalesRoute,
   AppSettingsRoute: AppSettingsRoute,
+  AppSuppliersRoute: AppSuppliersRoute,
   AppTeamRoute: AppTeamRoute,
 }
 

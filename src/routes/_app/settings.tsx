@@ -40,7 +40,7 @@ function SettingsPage() {
           <Field label="Código de moneda"><Input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} placeholder="DOP" /></Field>
         </div>
         <div className="flex gap-2 pt-2">
-          <Button onClick={save}>Guardar ajustes</Button>
+          <Button onClick={save} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">Guardar ajustes</Button>
           <Button variant="outline" onClick={reset}>Restablecer</Button>
         </div>
       </div>

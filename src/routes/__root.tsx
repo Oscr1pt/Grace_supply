@@ -59,8 +59,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "IMPERIO GOLD JOYERIA — Sistema de Ventas" },
-      { name: "description", content: "Manage clients, inventory, sales and purchases for your jewelry business." },
+      { title: "GRACE SUPPLY — Productos de Barbería & Belleza" },
+      { name: "description", content: "Sistema de gestión para productos de barbería, estética, herramientas y accesorios." },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
