@@ -7,6 +7,8 @@
 
 ## Dictamen
 
+> Actualización CHG-10 (2026-10-23): ver el [addendum de readiness](chg-10-deployment-readiness-addendum.md), que reemplaza el estado previo de seed/bootstrap y registra las evidencias actuales. El dictamen vigente es **NO LISTO PARA CLOUD**; ninguna operación remota fue autorizada o ejecutada.
+
 **No listo para despliegue todavía.** El historial local y los artefactos OpenSpec están completos, pero hay gates de seguridad/operación antes de cualquier `db push` o despliegue de Functions:
 
 1. Las auditorías repetidas para CHG-02 detectaron **19 vulnerabilidades en el árbol completo (6 críticas, 9 altas, 4 moderadas)** y **16 en producción (5 críticas, 7 altas, 4 moderadas)**. La crítica de TanStack Start es XSS reflejado sin autenticación. Esta auditoría posterior sí actualiza paquetes más abajo; ver el resultado final en “Resultado CHG-02”.

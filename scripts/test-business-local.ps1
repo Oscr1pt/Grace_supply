@@ -12,6 +12,7 @@ if (-not $env:LOCAL_SUPABASE_URL -or -not $env:LOCAL_SUPABASE_ANON_KEY -or -not 
 if ([uri]::new($env:LOCAL_SUPABASE_URL).Host -notin @('localhost', '127.0.0.1', '::1')) {
   throw 'Refusing to run CHG-07 fixtures against a non-local Supabase URL.'
 }
+$env:LOCAL_SUPABASE_CONTAINER = 'supabase_db_jewel-sales-hub'
 
 $fixturePath = Join-Path $PSScriptRoot '..\tests\fixtures\chg07-fail-supplier-credit.sql'
 $cleanupPath = Join-Path $PSScriptRoot '..\tests\fixtures\chg07-drop-failure-trigger.sql'

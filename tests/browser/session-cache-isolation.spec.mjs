@@ -330,12 +330,11 @@ test.describe("private browser cache isolation", () => {
     await page.getByRole("button", { name: "Cerrar sesión" }).click();
     await expect(page.getByRole("button", { name: "Entrar al sistema" })).toBeVisible();
     const secondTabLogin = secondTab.getByRole("button", { name: "Entrar al sistema" });
-    const secondTabUser = secondTab.getByText(userB.username, { exact: true });
-    await expect(secondTabLogin.or(secondTabUser)).toBeVisible();
+    const secondTabRestricted = secondTab.getByText("Acceso restringido");
+    await expect(secondTabLogin.or(secondTabRestricted)).toBeVisible();
     if (await secondTabLogin.isVisible().catch(() => false)) {
       await expect(secondTab.getByText(clientFixtureName, { exact: true })).toHaveCount(0);
     } else {
-      await expect(secondTab.getByText("Acceso restringido")).toBeVisible();
       await expect(secondTab.getByText(clientFixtureName, { exact: true })).toHaveCount(0);
     }
   });

@@ -9,6 +9,7 @@ const enabled = process.env.RUN_LOCAL_SECURITY_INTEGRATION === "1";
 const url = process.env.LOCAL_SUPABASE_URL;
 const anonKey = process.env.LOCAL_SUPABASE_ANON_KEY;
 const serviceKey = process.env.LOCAL_SUPABASE_SERVICE_ROLE_KEY;
+const databaseContainer = process.env.LOCAL_SUPABASE_CONTAINER;
 const jwtSecret = process.env.LOCAL_SUPABASE_JWT_SECRET;
 const mailpitUrl = process.env.LOCAL_MAILPIT_URL;
 const password = `Local-${crypto.randomUUID()}-9a!`;
@@ -53,6 +54,7 @@ function authLinkFromMailpit(detail, expectedType) {
 const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }, () => {
   before(async () => {
     assert.ok(url && anonKey && serviceKey, "local Supabase URL and keys are required");
+    assert.match(databaseContainer ?? "", /^supabase_db_[a-z0-9-]+$/, "an explicit local PostgreSQL container is required");
     const fixedAdminUsername = "__security_admin__";
     const fixedAdminEmail = "security-admin@example.test";
     const { data: previousAdmin } = await service
@@ -823,7 +825,7 @@ DO $$ DECLARE blocked boolean := false; BEGIN
   IF NOT blocked THEN RAISE EXCEPTION 'last_active_admin_guard_did_not_reject'; END IF;
 END $$;
 ROLLBACK;`;
-    execFileSync("docker", ["exec", "supabase_db_jewel-sales-hub", "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", transactionSql], { encoding: "utf8" });
+    execFileSync("docker", ["exec", databaseContainer, "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", transactionSql], { encoding: "utf8" });
   });
 
   test("unverified identities cannot be activated or obtain a session by username", async () => {

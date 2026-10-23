@@ -8,6 +8,7 @@ const enabled = process.env.RUN_LOCAL_BUSINESS_INTEGRATION === "1";
 const url = process.env.LOCAL_SUPABASE_URL;
 const anonKey = process.env.LOCAL_SUPABASE_ANON_KEY;
 const serviceKey = process.env.LOCAL_SUPABASE_SERVICE_ROLE_KEY;
+const databaseContainer = process.env.LOCAL_SUPABASE_CONTAINER;
 const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
 const password = `Local-${crypto.randomUUID()}-9a!`;
 const service = enabled && url && serviceKey
@@ -25,6 +26,7 @@ let testSettings;
 const integration = test.describe("local atomic financial operations", { skip: !enabled }, () => {
   before(async () => {
     assert.ok(url && anonKey && serviceKey, "local Supabase URL and keys are required");
+    assert.match(databaseContainer ?? "", /^supabase_db_[a-z0-9-]+$/, "an explicit local PostgreSQL container is required");
     assert.ok(["localhost", "127.0.0.1", "::1"].includes(new URL(url).hostname), "business integration tests only run against local Supabase");
 
     for (const identity of [
@@ -164,7 +166,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
   }
 
   function directPostgresJson(sql) {
-    const output = execFileSync("docker", ["exec", "-i", "supabase_db_jewel-sales-hub", "psql", "-X", "-A", "-t",
+    const output = execFileSync("docker", ["exec", "-i", databaseContainer, "psql", "-X", "-A", "-t",
       "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres"], {
       input: `${sql}\n`, encoding: "utf8", windowsHide: true,
     });
@@ -172,7 +174,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
   }
 
   function directPostgres(sql) {
-    execFileSync("docker", ["exec", "-i", "supabase_db_jewel-sales-hub", "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres"], {
+    execFileSync("docker", ["exec", "-i", databaseContainer, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres"], {
       input: `${sql}\n`, encoding: "utf8", windowsHide: true,
     });
   }
