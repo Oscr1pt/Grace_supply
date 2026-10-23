@@ -1,5 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { supabase } from "./supabase";
+import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
+import type { Session } from "@supabase/supabase-js";
+import type { UUID } from "./database.types";
+import { clearLegacyLocalSessionAndDataCache, supabase } from "./supabase";
+import { setReadFailure, userPersistenceMessage } from "./persistence.js";
+import { createAuthorizationScopeKey } from "./sessionScope.js";
 
 export const PERMISSIONS = [
   { key: "dashboard", label: "Panel" },
@@ -14,173 +20,318 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number]["key"];
 export type Role = "admin" | "employee";
+export type User = { username: string; name: string; role: Role; permissions: Permission[]; active: boolean; authUserId?: string };
 
-export const ALL_PERMISSIONS: Permission[] = PERMISSIONS.map((p) => p.key);
+export const ALL_PERMISSIONS: Permission[] = PERMISSIONS.map((permission) => permission.key);
 export const DEFAULT_EMPLOYEE_PERMISSIONS: Permission[] = ["sales"];
-
-type User = { username: string; name: string; role: Role; permissions: Permission[] };
 
 type AuthCtx = {
   user: User | null;
   users: User[];
+  authReady: boolean;
+  scopeKey: string;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string, name: string) => Promise<void>;
-  logout: () => void;
-  can: (p: Permission) => boolean;
+  logout: () => Promise<void>;
+  can: (permission: Permission) => boolean;
   isAdmin: boolean;
-  addEmployee: (data: { username: string; name: string; password: string; role: Role; permissions: Permission[] }) => Promise<void>;
-  updateEmployee: (username: string, patch: { name?: string; password?: string; role?: Role; permissions?: Permission[] }) => Promise<void>;
+  updateEmployee: (username: string, patch: { name?: string; role?: Role; permissions?: Permission[] }) => Promise<void>;
   removeEmployee: (username: string) => Promise<void>;
+  inviteEmployee: (input: { username: string; name: string; email: string }) => Promise<void>;
+  activateEmployee: (username: string) => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
-const SESSION_KEY = "lustre_session_v2";
+const INVALID_CREDENTIALS = "Usuario o contraseña inválidos";
+const AUTH_UNAVAILABLE = "No se pudo verificar la sesión. Intenta de nuevo.";
 
-function toPublic(row: Record<string, unknown>): User {
-  const role: Role = (row.role as Role) ?? "employee";
-  const perms = (row.permissions as Permission[]) ?? (role === "admin" ? ALL_PERMISSIONS : DEFAULT_EMPLOYEE_PERMISSIONS);
-  return {
-    username: row.username as string,
-    name: row.name as string,
-    role,
-    permissions: role === "admin" ? ALL_PERMISSIONS : perms,
-  };
+type ProfileRow = {
+  username: string;
+  name: string;
+  role: Role;
+  permissions: string[];
+  active: boolean;
+};
+
+function toPublic(row: ProfileRow, authUserId?: string): User {
+  const role: Role = row.role === "admin" ? "admin" : "employee";
+  const permissions = row.permissions.filter((permission): permission is Permission =>
+    ALL_PERMISSIONS.includes(permission as Permission)
+  );
+  return { username: row.username, name: row.name, role, permissions: role === "admin" ? ALL_PERMISSIONS : permissions, active: row.active, authUserId };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [authReady, setAuthReady] = useState(false);
+  const [cacheGeneration, setCacheGeneration] = useState(0);
+  const currentIdentity = useRef<string | null>(null);
+  const currentAuthorizationKey = useRef("anonymous");
+  const authRevision = useRef(0);
+  const initializedAuth = useRef(false);
+  const invalidationChannel = useRef<BroadcastChannel | null>(null);
+
+  const loadCurrentProfile = useCallback(async () => {
+    const { data: authResult, error: authError } = await supabase.auth.getUser();
+    if (authError || !authResult.user?.email_confirmed_at) return null;
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("username, name, role, permissions, active")
+      .eq("auth_user_id", authResult.user.id as UUID)
+      .maybeSingle();
+    if (error || !data?.active) return null;
+    return toPublic(data as ProfileRow, authResult.user.id);
+  }, []);
 
   const refreshUsers = useCallback(async () => {
-    const { data } = await supabase.from("users").select("username, name, role, permissions");
-    if (data) setUsers(data.map((r) => toPublic(r as Record<string, unknown>)));
+    const revision = authRevision.current;
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("username, name, role, permissions, active")
+      .order("username");
+    if (error) {
+      if (revision !== authRevision.current) return;
+      setReadFailure("user_profiles", userPersistenceMessage(error));
+      return;
+    }
+    if (revision !== authRevision.current) return;
+    setUsers((data ?? []).map((profile) => toPublic(profile as ProfileRow)));
+    setReadFailure("user_profiles", null);
   }, []);
+
+  const announceInvalidation = useCallback(() => {
+    try {
+      invalidationChannel.current?.postMessage({ type: "invalidate-private-state" });
+    } catch {
+      // Cross-tab messaging is a hint; each tab still validates its own Auth session and RLS access.
+    }
+  }, []);
+
+  const acceptSession = useCallback(async (session: Session | null, revision: number, announce = false) => {
+    setAuthReady(false);
+    if (!session) {
+      const changed = !initializedAuth.current || currentIdentity.current !== null;
+      if (changed) clearLegacyLocalSessionAndDataCache();
+      currentIdentity.current = null;
+      currentAuthorizationKey.current = "anonymous";
+      initializedAuth.current = true;
+      if (changed) setCacheGeneration((generation) => generation + 1);
+      if (revision !== authRevision.current) return;
+      setUser(null);
+      setUsers([]);
+      setAuthReady(true);
+      if (announce && changed) announceInvalidation();
+      return;
+    }
+
+    const profile = await loadCurrentProfile();
+    if (revision !== authRevision.current) return;
+    if (!profile) {
+      const { data: currentSession } = await supabase.auth.getSession();
+      if (revision !== authRevision.current || currentSession.session?.user.id !== session.user.id) return;
+      await supabase.auth.signOut({ scope: "local" });
+      return;
+    }
+    if (profile.authUserId !== session.user.id) return;
+    const nextAuthorizationKey = createAuthorizationScopeKey(profile);
+    const changed = !initializedAuth.current || currentAuthorizationKey.current !== nextAuthorizationKey;
+    if (changed) {
+      clearLegacyLocalSessionAndDataCache();
+      setCacheGeneration((generation) => generation + 1);
+    }
+    currentIdentity.current = profile?.authUserId ?? null;
+    currentAuthorizationKey.current = nextAuthorizationKey;
+    initializedAuth.current = true;
+    setUser(profile);
+    setAuthReady(true);
+    if (announce && changed) announceInvalidation();
+  }, [announceInvalidation, loadCurrentProfile]);
+
+  const revalidateSession = useCallback(async (invalidateImmediately = false) => {
+    const revision = ++authRevision.current;
+    if (invalidateImmediately) setCacheGeneration((generation) => generation + 1);
+    setAuthReady(false);
+    const { data, error } = await supabase.auth.getSession();
+    if (revision !== authRevision.current) return;
+    if (error) {
+      clearLegacyLocalSessionAndDataCache();
+      currentIdentity.current = null;
+      currentAuthorizationKey.current = "anonymous";
+      setUser(null);
+      setUsers([]);
+      setCacheGeneration((generation) => generation + 1);
+      setAuthReady(true);
+      await supabase.auth.signOut({ scope: "local" });
+      return;
+    }
+    await acceptSession(data.session, revision);
+  }, [acceptSession]);
 
   useEffect(() => {
-    refreshUsers();
-    // Restore session from localStorage
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const session = JSON.parse(raw) as User;
-        if (session?.username) setUser(session);
-      }
-    } catch { /* ignore */ }
-  }, [refreshUsers]);
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "TOKEN_REFRESHED") return;
+      const revision = ++authRevision.current;
+      queueMicrotask(() => void acceptSession(session, revision, true));
+    });
+    const initialRevision = authRevision.current;
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (initialRevision !== authRevision.current) return;
+      if (error) return void acceptSession(null, initialRevision);
+      return acceptSession(data.session, initialRevision);
+    });
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [acceptSession]);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel("grace-supply-session-invalidation");
+    invalidationChannel.current = channel;
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      if (
+        typeof event.data === "object" && event.data !== null &&
+        "type" in event.data && event.data.type === "invalidate-private-state"
+      ) void revalidateSession(true);
+    };
+    return () => {
+      channel.close();
+      if (invalidationChannel.current === channel) invalidationChannel.current = null;
+    };
+  }, [revalidateSession]);
+
+  useEffect(() => {
+    if (user?.role === "admin") void refreshUsers();
+    else setUsers([]);
+  }, [user, refreshUsers]);
+
+  useEffect(() => {
+    const revalidate = () => {
+      if (document.visibilityState === "visible") void revalidateSession(true);
+    };
+    document.addEventListener("visibilitychange", revalidate);
+    return () => document.removeEventListener("visibilitychange", revalidate);
+  }, [revalidateSession]);
+
+  const authorizationKey = createAuthorizationScopeKey(user);
+  const scopeKey = `${authorizationKey}:${cacheGeneration}`;
+
+  useEffect(() => {
+    queryClient.clear();
+    void router.invalidate();
+  }, [queryClient, router, scopeKey]);
 
   const login = useCallback(async (username: string, password: string) => {
-    const cleanUsername = username.trim();
-    const { data, error } = await supabase
-      .from("users")
-      .select("*")
-      .ilike("username", cleanUsername)
-      .eq("password", password)
-      .single();
-
+    const { data, error } = await supabase.functions.invoke<{ session: Session }>("username-login", {
+      body: { username, password },
+    });
     if (error) {
-      console.error("Supabase login error:", error);
-      if (error.code === "PGRST116" || error.details?.includes("0 rows")) {
-        throw new Error("Usuario o contraseña inválidos");
+      const status = (error as { context?: Response }).context?.status;
+      if (status === 401) throw new Error(INVALID_CREDENTIALS);
+      throw new Error("El servicio de inicio de sesión no está disponible.");
+    }
+    if (!data?.session?.access_token || !data.session.refresh_token) throw new Error(INVALID_CREDENTIALS);
+
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+    });
+    if (sessionError) throw new Error(AUTH_UNAVAILABLE);
+    const loginRevision = authRevision.current;
+    const profile = await loadCurrentProfile();
+    const expectedIdentity = data.session.user?.id;
+    if (loginRevision !== authRevision.current) throw new Error(AUTH_UNAVAILABLE);
+    if (!profile || (expectedIdentity && profile.authUserId !== expectedIdentity)) {
+      const { data: currentSession } = await supabase.auth.getSession();
+      if (expectedIdentity && currentSession.session?.user.id === expectedIdentity) {
+        await supabase.auth.signOut({ scope: "local" });
       }
-      throw new Error(error.message || "Error al conectar con el servicio de autenticación");
+      throw new Error(INVALID_CREDENTIALS);
     }
-
-    if (!data) {
-      throw new Error("Usuario o contraseña inválidos");
+    const nextAuthorizationKey = createAuthorizationScopeKey(profile);
+    if (!initializedAuth.current || currentAuthorizationKey.current !== nextAuthorizationKey) {
+      clearLegacyLocalSessionAndDataCache();
+      setCacheGeneration((generation) => generation + 1);
     }
+    authRevision.current += 1;
+    currentAuthorizationKey.current = nextAuthorizationKey;
+    currentIdentity.current = profile.authUserId ?? null;
+    initializedAuth.current = true;
+    setUser(profile);
+    setAuthReady(true);
+    announceInvalidation();
+  }, [announceInvalidation, loadCurrentProfile]);
 
-    const u = toPublic(data as Record<string, unknown>);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(u));
-    setUser(u);
-  }, []);
-
-  const register = useCallback(async (username: string, password: string, name: string) => {
-    const { data: existing } = await supabase
-      .from("users")
-      .select("username")
-      .ilike("username", username)
-      .single();
-    if (existing) throw new Error("Ya existe una cuenta con este nombre de usuario");
-    if (password.length < 6) throw new Error("La contraseña debe tener al menos 6 caracteres");
-    const { data, error } = await supabase
-      .from("users")
-      .insert({ username, name, password, role: "admin", permissions: ALL_PERMISSIONS })
-      .select()
-      .single();
-    if (error || !data) throw new Error(error?.message ?? "Error al crear cuenta");
-    const u = toPublic(data as Record<string, unknown>);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(u));
-    setUser(u);
-    await refreshUsers();
-  }, [refreshUsers]);
-
-  const logout = useCallback(() => {
-    localStorage.removeItem(SESSION_KEY);
+  const logout = useCallback(async () => {
+    authRevision.current += 1;
+    clearLegacyLocalSessionAndDataCache();
+    currentIdentity.current = null;
+    currentAuthorizationKey.current = "anonymous";
+    initializedAuth.current = true;
+    setCacheGeneration((generation) => generation + 1);
     setUser(null);
-  }, []);
+    setUsers([]);
+    setAuthReady(true);
+    announceInvalidation();
+    await supabase.auth.signOut({ scope: "local" });
+  }, [announceInvalidation]);
 
-  const addEmployee = useCallback(async (data: { username: string; name: string; password: string; role: Role; permissions: Permission[] }) => {
-    const { data: existing } = await supabase
-      .from("users")
-      .select("username")
-      .ilike("username", data.username)
-      .single();
-    if (existing) throw new Error("Ya existe una cuenta con este nombre de usuario");
-    if (data.password.length < 6) throw new Error("La contraseña debe tener al menos 6 caracteres");
-    const { error } = await supabase.from("users").insert({
-      username: data.username,
-      name: data.name,
-      password: data.password,
-      role: data.role,
-      permissions: data.role === "admin" ? ALL_PERMISSIONS : data.permissions,
+  const updateEmployee = useCallback(async (username: string, patch: { name?: string; role?: Role; permissions?: Permission[] }) => {
+    const { error } = await supabase.functions.invoke("manage-profile", {
+      body: { action: "update", username, ...patch },
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(userPersistenceMessage(error));
     await refreshUsers();
-  }, [refreshUsers]);
-
-  const updateEmployee = useCallback(async (username: string, patch: { name?: string; password?: string; role?: Role; permissions?: Permission[] }) => {
-    const update: Record<string, unknown> = {};
-    if (patch.name !== undefined) update.name = patch.name;
-    if (patch.password) update.password = patch.password;
-    if (patch.role) {
-      update.role = patch.role;
-      update.permissions = patch.role === "admin" ? ALL_PERMISSIONS : (patch.permissions ?? DEFAULT_EMPLOYEE_PERMISSIONS);
-    } else if (patch.permissions) {
-      update.permissions = patch.permissions;
-    }
-    const { error } = await supabase.from("users").update(update).ilike("username", username);
-    if (error) throw new Error(error.message);
-    await refreshUsers();
-    // Keep local session in sync if updating self
-    setUser((cur) => {
-      if (!cur || cur.username.toLowerCase() !== username.toLowerCase()) return cur;
-      const next = { ...cur, ...patch };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(next));
-      return next as User;
-    });
-  }, [refreshUsers]);
+    announceInvalidation();
+    if (username === user?.username) await revalidateSession(true);
+  }, [announceInvalidation, refreshUsers, revalidateSession, user?.username]);
 
   const removeEmployee = useCallback(async (username: string) => {
-    const { error } = await supabase.from("users").delete().ilike("username", username);
-    if (error) throw new Error(error.message);
+    const { error } = await supabase.functions.invoke("manage-profile", {
+      body: { action: "revoke", username },
+    });
+    if (error) throw new Error(userPersistenceMessage(error));
     await refreshUsers();
-  }, [refreshUsers]);
+    announceInvalidation();
+    if (username === user?.username) await revalidateSession(true);
+  }, [announceInvalidation, refreshUsers, revalidateSession, user?.username]);
+
+  const inviteEmployee = useCallback(async (input: { username: string; name: string; email: string }) => {
+    const { error } = await supabase.functions.invoke("manage-profile", {
+      body: { action: "invite_employee", ...input, permissions: DEFAULT_EMPLOYEE_PERMISSIONS },
+    });
+    if (error) throw new Error(userPersistenceMessage(error));
+    await refreshUsers();
+    announceInvalidation();
+  }, [announceInvalidation, refreshUsers]);
+
+  const activateEmployee = useCallback(async (username: string) => {
+    const { error } = await supabase.functions.invoke("manage-profile", {
+      body: { action: "activate", username },
+    });
+    if (error) throw new Error(userPersistenceMessage(error));
+    await refreshUsers();
+    announceInvalidation();
+  }, [announceInvalidation, refreshUsers]);
 
   const isAdmin = user?.role === "admin";
   const can = useCallback(
-    (p: Permission) => (user ? user.role === "admin" || user.permissions.includes(p) : false),
+    (permission: Permission) => Boolean(user && (user.role === "admin" || user.permissions.includes(permission))),
     [user],
   );
 
   return (
-    <Ctx.Provider value={{ user, users, login, register, logout, can, isAdmin, addEmployee, updateEmployee, removeEmployee }}>
-      {children}
+    <Ctx.Provider value={{ user, users, authReady, scopeKey, login, logout, can, isAdmin, updateEmployee, removeEmployee, inviteEmployee, activateEmployee }}>
+      <Fragment key={scopeKey}>{children}</Fragment>
     </Ctx.Provider>
   );
 }
 
 export function useAuth() {
-  const ctx = useContext(Ctx);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
+  const context = useContext(Ctx);
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
+  return context;
 }

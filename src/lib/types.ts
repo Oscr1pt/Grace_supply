@@ -73,6 +73,8 @@ export type Sale = {
   paymentType?: "contado" | "credito";
   dueDate?: string;
   createdAt: string;
+  voidedAt?: string;
+  voidReason?: string;
 };
 
 export type Purchase = {
@@ -88,10 +90,12 @@ export type Purchase = {
   invoiceNo?: string;
   dueDate?: string;
   createdAt: string;
+  voidedAt?: string;
+  voidReason?: string;
 };
 
-export type CreditStatus = "pendiente" | "parcial" | "pagada" | "vencida";
-export type PaymentMethod = "efectivo" | "transferencia" | "tarjeta" | "otro";
+export type CreditStatus = "pendiente" | "parcial" | "pagada" | "vencida" | "anulada";
+export type PaymentMethod = "efectivo" | "transferencia" | "tarjeta" | "otro" | "cheque";
 
 export type ClientCredit = {
   id: string;
@@ -120,10 +124,8 @@ export type SupplierCredit = {
   createdAt: string;
 };
 
-export type CreditPayment = {
+type CreditPaymentBase = {
   id: string;
-  creditId: string; // References client_credits or supplier_credits
-  creditType: "client" | "supplier";
   amount: number;
   date: string;
   method: PaymentMethod;
@@ -131,6 +133,11 @@ export type CreditPayment = {
   note?: string;
   createdAt: string;
 };
+
+export type CreditPayment = CreditPaymentBase & (
+  | { clientCreditId: string; supplierCreditId?: never }
+  | { supplierCreditId: string; clientCreditId?: never }
+);
 
 export type ExpenseCategory =
   | "nomina"
@@ -174,7 +181,7 @@ export type Settings = {
   businessAddress: string;
   businessPhone: string;
   taxRate: number;
-  currency: string;
+  currency: "DOP";
   /** Printed label size in millimeters */
   labelWidthMm: number;
   labelHeightMm: number;

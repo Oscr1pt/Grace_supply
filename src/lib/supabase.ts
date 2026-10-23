@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "./database.types";
 
 function getEnvVar(name: string): string | undefined {
   if (typeof import.meta !== "undefined" && import.meta.env) {
@@ -31,7 +32,51 @@ const supabaseAnonKey =
   "";
 
 export const supabaseUrl = sanitizeSupabaseUrl(rawSupabaseUrl);
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+const tabSessionStorage = {
+  getItem(key: string) {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem(key: string, value: string) {
+    try {
+      if (typeof window !== "undefined") window.sessionStorage.setItem(key, value);
+    } catch {
+      // The Auth client still holds the verified session in memory for this tab.
+    }
+  },
+  removeItem(key: string) {
+    try {
+      if (typeof window !== "undefined") window.sessionStorage.removeItem(key);
+    } catch {
+      // A blocked browser storage API must not prevent local sign-out.
+    }
+  },
+};
+
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storage: tabSessionStorage,
+    flowType: "pkce",
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
+
+export function clearLegacyLocalSessionAndDataCache() {
+  if (typeof window === "undefined") return;
+  try {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith("lustre_")) window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Auth remains authoritative if browser storage is unavailable.
+  }
+}
 
 // ─── snake_case ↔ camelCase helpers ──────────────────────────────────────────
 

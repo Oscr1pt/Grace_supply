@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS chg07_test_fail_supplier_credit ON public.supplier_credits;
+DROP FUNCTION IF EXISTS public.chg07_test_fail_supplier_credit();
+DROP TRIGGER IF EXISTS chg07_test_fail_sale_line ON public.sale_lines;
+DROP FUNCTION IF EXISTS public.chg07_test_fail_sale_line();
+DROP TRIGGER IF EXISTS chg07_test_fail_client_credit_update ON public.client_credits;
+DROP FUNCTION IF EXISTS public.chg07_test_fail_client_credit_update();
+DROP TRIGGER IF EXISTS chg07_test_fail_inventory_adjustment ON public.inventory;
+DROP FUNCTION IF EXISTS public.chg07_test_fail_inventory_adjustment();
+DROP TRIGGER IF EXISTS chg07_test_delay_purchase ON public.purchases;
+DROP FUNCTION IF EXISTS public.chg07_test_delay_purchase();

@@ -13,6 +13,8 @@ import { Plus, Pencil, Trash2, Barcode as BarcodeIcon, Printer, Search, Scissors
 
 import { BarcodeLabel, LabelSizeControls } from "@/components/BarcodeLabel";
 import { toast } from "sonner";
+import { userPersistenceMessage } from "@/lib/persistence.js";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app/inventory")({
   component: InventoryPage,
@@ -48,7 +50,7 @@ const emptyForm: Omit<InventoryItem, "id" | "createdAt"> = {
   sizeLabel: "",
   costPrice: 0,
   price: 0,
-  quantity: 1,
+  quantity: 0,
 };
 
 function genSku() {
@@ -56,6 +58,7 @@ function genSku() {
 }
 
 function InventoryPage() {
+  const { isAdmin } = useAuth();
   const { data: items, insert: insertItem, update: updateItem, remove: removeItem } = useSupabaseTable<InventoryItem>("inventory");
   const [settings, setSettings] = useSettings();
   const [open, setOpen] = useState(false);
@@ -63,6 +66,7 @@ function InventoryPage() {
   const [form, setForm] = useState(emptyForm);
   const [q, setQ] = useState("");
   const [barcodeItem, setBarcodeItem] = useState<InventoryItem | null>(null);
+  const [pending, setPending] = useState(false);
 
   const startNew = () => {
     setEditing(null);
@@ -89,13 +93,16 @@ function InventoryPage() {
   };
 
   const save = async () => {
+    if (pending) return;
     if (!form.name.trim() || !form.sku.trim()) {
       toast.error("Nombre y SKU son obligatorios");
       return;
     }
+    setPending(true);
     try {
       if (editing) {
-        await updateItem(editing.id, form);
+        const { quantity: _stock, ...metadataAndPrice } = form;
+        await updateItem(editing.id, metadataAndPrice);
         toast.success("Producto actualizado");
       } else {
         await insertItem({ id: uid(), createdAt: new Date().toISOString(), ...form });
@@ -103,7 +110,9 @@ function InventoryPage() {
       }
       setOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al guardar");
+      toast.error(userPersistenceMessage(e));
+    } finally {
+      setPending(false);
     }
   };
 
@@ -113,7 +122,7 @@ function InventoryPage() {
       await removeItem(id);
       toast.success("Producto eliminado");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+      toast.error(userPersistenceMessage(e));
     }
   };
 
@@ -241,6 +250,7 @@ function InventoryPage() {
                       type="number"
                       step="0.01"
                       value={form.costPrice}
+                      disabled={!isAdmin || pending}
                       onChange={(e) => setForm({ ...form, costPrice: +e.target.value })}
                     />
                   </Field>
@@ -249,6 +259,7 @@ function InventoryPage() {
                       type="number"
                       step="0.01"
                       value={form.price}
+                      disabled={!isAdmin || pending}
                       onChange={(e) => setForm({ ...form, price: +e.target.value })}
                     />
                   </Field>
@@ -256,15 +267,19 @@ function InventoryPage() {
                     <Input
                       type="number"
                       value={form.quantity}
-                      onChange={(e) => setForm({ ...form, quantity: +e.target.value })}
+                      disabled
+                      aria-describedby="stock-operation-note"
                     />
                   </Field>
                 </div>
+                <p id="stock-operation-note" className="text-xs text-muted-foreground">
+                  El stock se actualiza al registrar una compra o venta autorizada.
+                </p>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-                <Button onClick={save} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
-                  {editing ? "Guardar cambios" : "Agregar producto"}
+                <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancelar</Button>
+                <Button onClick={save} disabled={pending} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                  {pending ? "Guardando…" : editing ? "Guardar cambios" : "Agregar producto"}
                 </Button>
               </DialogFooter>
             </DialogContent>
