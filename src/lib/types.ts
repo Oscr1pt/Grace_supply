@@ -29,24 +29,30 @@ export type Supplier = {
   createdAt: string;
 };
 
-export type ItemKind = "joya" | "piedra";
-
 export type InventoryItem = {
   id: string;
-  sku: string; // used as barcode value
-  kind: ItemKind; // "joya" full piece, "piedra" loose stone/consumable
+  sku: string;
+  /** Legacy discriminator retained only to read old rows during migration. */
+  kind?: string;
   name: string;
-  category: "anillo" | "collar" | "pulsera" | "arete" | "dije" | "reloj" | "piedra" | "otro";
-  metal?: string; // Brand / Manufacturer
-  karat?: string; // Volume / Presentation
-  weightGrams?: number;
-  stone?: string;
-  stoneCarats?: number;
-  stoneCut?: string;
-  stoneClarity?: string;
-  stoneColor?: string;
-  sizeMm?: number;
-  sizeLabel?: string;
+  description: string;
+  category: string;
+  brand: string | null;
+  presentation: string | null;
+  unit: string | null;
+  attributes: Record<string, unknown>;
+  isActive: boolean;
+  /** Legacy jewelry columns remain readable until a separately approved cleanup. */
+  metal?: string | null;
+  karat?: string | null;
+  weightGrams?: number | null;
+  stone?: string | null;
+  stoneCarats?: number | null;
+  stoneCut?: string | null;
+  stoneClarity?: string | null;
+  stoneColor?: string | null;
+  sizeMm?: number | null;
+  sizeLabel?: string | null;
   costPrice: number;
   price: number;
   quantity: number;
@@ -73,6 +79,8 @@ export type Sale = {
   paymentType?: "contado" | "credito";
   dueDate?: string;
   createdAt: string;
+  voidedAt?: string;
+  voidReason?: string;
 };
 
 export type Purchase = {
@@ -88,10 +96,12 @@ export type Purchase = {
   invoiceNo?: string;
   dueDate?: string;
   createdAt: string;
+  voidedAt?: string;
+  voidReason?: string;
 };
 
-export type CreditStatus = "pendiente" | "parcial" | "pagada" | "vencida";
-export type PaymentMethod = "efectivo" | "transferencia" | "tarjeta" | "otro";
+export type CreditStatus = "pendiente" | "parcial" | "pagada" | "vencida" | "anulada";
+export type PaymentMethod = "efectivo" | "transferencia" | "tarjeta" | "otro" | "cheque";
 
 export type ClientCredit = {
   id: string;
@@ -120,10 +130,8 @@ export type SupplierCredit = {
   createdAt: string;
 };
 
-export type CreditPayment = {
+type CreditPaymentBase = {
   id: string;
-  creditId: string; // References client_credits or supplier_credits
-  creditType: "client" | "supplier";
   amount: number;
   date: string;
   method: PaymentMethod;
@@ -131,6 +139,11 @@ export type CreditPayment = {
   note?: string;
   createdAt: string;
 };
+
+export type CreditPayment = CreditPaymentBase & (
+  | { clientCreditId: string; supplierCreditId?: never }
+  | { supplierCreditId: string; clientCreditId?: never }
+);
 
 export type ExpenseCategory =
   | "nomina"
@@ -174,7 +187,7 @@ export type Settings = {
   businessAddress: string;
   businessPhone: string;
   taxRate: number;
-  currency: string;
+  currency: "DOP";
   /** Printed label size in millimeters */
   labelWidthMm: number;
   labelHeightMm: number;

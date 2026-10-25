@@ -1,16 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { useSupabaseTable, uid, fmtMoney, fmtDate } from "@/lib/storage";
+import { useRef, useState } from "react";
+import { useSupabaseTable, useSupabaseView, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
-import type { Purchase, InventoryItem } from "@/lib/types";
+import type { Purchase } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Ban } from "lucide-react";
 import { toast } from "sonner";
+import { PersistenceError, userPersistenceMessage } from "@/lib/persistence.js";
+import { getConfirmedBusinessOperation, postBusinessOperation, runFinancialCorrection } from "@/lib/businessOperations";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app/purchases")({
   component: PurchasesPage,
@@ -21,11 +24,13 @@ const empty: Omit<Purchase, "id" | "createdAt" | "total"> = {
 };
 
 function PurchasesPage() {
-  const { data: purchases, insert: insertPurchase, remove: removePurchase } = useSupabaseTable<Purchase>("purchases");
-  const { data: inventory, update: updateInventory } = useSupabaseTable<InventoryItem>("inventory");
-  const { data: suppliers } = useSupabaseTable<Supplier>("suppliers");
-  const { insert: insertSupplierCredit } = useSupabaseTable<SupplierCredit>("supplier_credits");
+  const { data: purchases, refresh: refreshPurchases } = useSupabaseTable<Purchase>("purchases");
+  const { data: inventory, refresh: refreshInventory } = useSupabaseView("sales_inventory_lookup");
+  const { data: suppliers } = useSupabaseView("purchases_supplier_lookup");
+  const requestKey = useRef<string | null>(null);
   const [settings] = useSettings();
+  const { user } = useAuth();
+  const annulKeys = useRef(new Map<string, string>());
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(empty);
   const [supplierId, setSupplierId] = useState("");
@@ -33,71 +38,64 @@ function PurchasesPage() {
   const [invoiceNo, setInvoiceNo] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [restock, setRestock] = useState(true);
+  const [pending, setPending] = useState(false);
+  const [needsReconciliation, setNeedsReconciliation] = useState(false);
 
   const save = async () => {
+    if (pending || needsReconciliation) return;
     const selectedSup = suppliers.find((s) => s.id === supplierId);
     const supplierName = selectedSup ? selectedSup.name : form.supplier.trim();
-
     if (!supplierName) { toast.error("El proveedor es obligatorio"); return; }
-    const total = form.quantity * form.unitCost;
-    const purchaseId = uid();
-    const invNo = invoiceNo.trim() || `COMP-${purchaseId.slice(0, 6).toUpperCase()}`;
-
+    if (paymentType === "credito" && !selectedSup) { toast.error("El cr?dito requiere seleccionar un proveedor registrado"); return; }
+    setPending(true);
+    const idempotencyKey = requestKey.current ?? globalThis.crypto.randomUUID();
+    requestKey.current = idempotencyKey;
+    const invNo = invoiceNo.trim() || "COMP-" + idempotencyKey.slice(0, 8).toUpperCase();
     try {
-      const purchase: Purchase = {
-        id: purchaseId,
-        createdAt: new Date().toISOString(),
-        supplier: supplierName,
-        supplierId: selectedSup?.id,
-        paymentType,
-        invoiceNo: invNo,
-        dueDate: paymentType === "credito" ? dueDate : undefined,
-        total,
-        ...form,
-      };
-
-      await insertPurchase(purchase);
-
-      if (restock && form.itemId) {
-        const item = inventory.find((i) => i.id === form.itemId);
-        if (item) await updateInventory(item.id, { quantity: item.quantity + form.quantity });
-      }
-
-      // If Purchase is on Credit, automatically generate a SupplierCredit (Cuenta por Pagar)
-      if (paymentType === "credito") {
-        await insertSupplierCredit({
-          id: uid(),
-          purchaseId,
-          supplierId: selectedSup?.id,
-          supplierName,
-          invoiceNo: invNo,
-          total,
-          paid: 0,
-          balance: total,
-          status: "pendiente",
-          dueDate: dueDate || undefined,
-          createdAt: new Date().toISOString(),
-        });
-        toast.success("Compra a crédito registrada y cuenta por pagar creada");
-      } else {
-        toast.success("Compra registrada");
-      }
-
-      setOpen(false);
-      setForm(empty);
-      setSupplierId("");
-      setPaymentType("contado");
-      setInvoiceNo("");
-      setDueDate("");
+      await postBusinessOperation("purchase", {
+        idempotency_key: idempotencyKey, supplier_id: selectedSup?.id ?? null, supplier_name: supplierName,
+        item_id: form.itemId || null, description: form.description, quantity: form.quantity,
+        unit_cost: Number(form.unitCost).toFixed(2), restock: Boolean(restock && form.itemId),
+        payment_type: paymentType, invoice_no: invNo, due_date: paymentType === "credito" ? dueDate || null : null,
+      });
+      requestKey.current = null;
+      void refreshPurchases();
+      void refreshInventory();
+      toast.success(paymentType === "credito" ? "Compra y cuenta por pagar confirmadas" : "Compra confirmada");
+      setOpen(false); setForm(empty); setSupplierId(""); setPaymentType("contado"); setInvoiceNo(""); setDueDate("");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al registrar");
-    }
+      const uncertain = e instanceof PersistenceError && e.kind === "uncertain";
+      if (uncertain) setNeedsReconciliation(true); else requestKey.current = null;
+      toast.error(userPersistenceMessage(e));
+    } finally { setPending(false); }
+  };
+
+  const reconcilePurchase = async () => {
+    const key = requestKey.current;
+    if (!key || pending) return;
+    setPending(true);
+    try {
+      const result = await getConfirmedBusinessOperation("purchase", key);
+      if (!result) { toast.error("La operación todavía no aparece confirmada. Conserva el formulario y vuelve a consultar."); return; }
+      requestKey.current = null; setNeedsReconciliation(false);
+      void refreshPurchases(); void refreshInventory();
+      toast.success("Compra reconciliada con el resultado persistido");
+      setOpen(false); setForm(empty); setSupplierId(""); setPaymentType("contado"); setInvoiceNo(""); setDueDate("");
+    } catch (error) { toast.error(userPersistenceMessage(error)); }
+    finally { setPending(false); }
   };
 
   const remove = async (id: string) => {
-    if (!confirm("¿Eliminar esta compra?")) return;
+    if (user?.role !== "admin") { toast.error("Solo un administrador activo puede anular compras."); return; }
+    const reason = window.prompt("Motivo obligatorio para anular esta compra:");
+    if (!reason?.trim()) { toast.error("La anulación requiere un motivo."); return; }
     try {
-      await removePurchase(id);
+      const key = annulKeys.current.get(id) ?? globalThis.crypto.randomUUID();
+      annulKeys.current.set(id, key);
+      await runFinancialCorrection("financial_annulment", { idempotency_key: key, document_type: "purchase", document_id: id, reason: reason.trim() });
+      annulKeys.current.delete(id);
+      void refreshPurchases(); void refreshInventory();
+      toast.success("Compra anulada con compensación persistida");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error al eliminar");
     }
@@ -111,7 +109,7 @@ function PurchasesPage() {
         title="Compras"
         description="Reabastecimientos de productos y gastos con proveedores (Contado / Crédito)."
         actions={
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={open} onOpenChange={(value) => { if (!value && needsReconciliation) return; setOpen(value); }}>
             <DialogTrigger asChild>
               <Button className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
                 <Plus className="h-4 w-4 mr-1.5" /> Nueva compra
@@ -129,7 +127,7 @@ function PurchasesPage() {
                     }}>
                       <SelectTrigger><SelectValue placeholder="Elige un proveedor" /></SelectTrigger>
                       <SelectContent>
-                        {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} (RNC: {s.rnc || "N/A"})</SelectItem>)}
+                        {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -167,7 +165,7 @@ function PurchasesPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">— Ninguno —</SelectItem>
-                      {inventory.map((i) => <SelectItem key={i.id} value={i.id}>{i.sku} — {i.name}</SelectItem>)}
+                      {inventory.map((i) => <SelectItem key={i.id} value={i.id}>{i.sku} — {i.name} · Stock {i.quantity} · {fmtMoney(i.price, settings.currency)}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -192,8 +190,11 @@ function PurchasesPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-                <Button onClick={save} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">Registrar compra</Button>
+                <Button variant="outline" onClick={() => setOpen(false)} disabled={pending || needsReconciliation}>Cancelar</Button>
+                <p role="status" className="mr-auto text-sm text-muted-foreground">Compra, reposición y crédito se confirman en una operación.</p>
+                {needsReconciliation && <p role="alert" className="text-sm text-destructive">No se recibió confirmación. No repitas la compra; consulta el resultado con la misma clave.</p>}
+                {needsReconciliation && <Button variant="outline" onClick={reconcilePurchase} disabled={pending}>Consultar operación</Button>}
+                <Button onClick={save} disabled={pending || needsReconciliation} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">{pending ? "Confirmando?" : "Confirmar compra"}</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -226,7 +227,7 @@ function PurchasesPage() {
                 <td className="px-4 py-3 text-right">{p.quantity}</td>
                 <td className="px-4 py-3 text-right font-mono">{fmtMoney(p.total, settings.currency)}</td>
                 <td className="px-4 py-3">
-                  <Button size="icon" variant="ghost" onClick={() => remove(p.id)}><Trash2 className="h-4 w-4" /></Button>
+                  {p.voidedAt ? <span className="px-2 text-xs text-rose-400">Anulada</span> : user?.role === "admin" && <Button size="icon" variant="ghost" onClick={() => remove(p.id)} title="Anular compra"><Ban className="h-4 w-4" /></Button>}
                 </td>
               </tr>
             ))}

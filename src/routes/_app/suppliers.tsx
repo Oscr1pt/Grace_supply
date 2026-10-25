@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSupabaseTable, uid, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type {
@@ -19,6 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Plus, Pencil, Trash2, Search, CreditCard, History, DollarSign, CheckCircle2, AlertCircle, Building2, Filter } from "lucide-react";
 import { toast } from "sonner";
+import { PersistenceError, userPersistenceMessage } from "@/lib/persistence.js";
+import { getConfirmedBusinessOperation, postBusinessOperation } from "@/lib/businessOperations";
 
 export const Route = createFileRoute("/_app/suppliers")({
   component: SuppliersPage,
@@ -40,10 +42,11 @@ const emptySupplier: Omit<Supplier, "id" | "createdAt"> = {
 
 function SuppliersPage() {
   const { data: suppliers, insert, update, remove } = useSupabaseTable<Supplier>("suppliers");
-  const { data: credits, update: updateCredit } = useSupabaseTable<SupplierCredit>("supplier_credits");
-  const { data: payments, insert: insertPayment } = useSupabaseTable<CreditPayment>("credit_payments");
+  const { data: credits, refresh: refreshCredits } = useSupabaseTable<SupplierCredit>("supplier_credits");
+  const { data: payments, refresh: refreshPayments } = useSupabaseTable<CreditPayment>("credit_payments");
   const { data: purchases } = useSupabaseTable<Purchase>("purchases");
   const [settings] = useSettings();
+  const paymentRequestKey = useRef<string | null>(null);
 
   const [openForm, setOpenForm] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
@@ -63,6 +66,8 @@ function SuppliersPage() {
   const [payMethod, setPayMethod] = useState<PaymentMethod>("transferencia");
   const [payRef, setPayRef] = useState("");
   const [payNote, setPayNote] = useState("");
+  const [pending, setPending] = useState(false);
+  const [paymentNeedsReconciliation, setPaymentNeedsReconciliation] = useState(false);
 
   const startNew = () => {
     setEditing(null);
@@ -77,10 +82,12 @@ function SuppliersPage() {
   };
 
   const saveSupplier = async () => {
+    if (pending) return;
     if (!form.name.trim()) {
       toast.error("El nombre / razón social es obligatorio");
       return;
     }
+    setPending(true);
     try {
       if (editing) {
         await update(editing.id, form);
@@ -91,7 +98,9 @@ function SuppliersPage() {
       }
       setOpenForm(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al guardar");
+      toast.error(userPersistenceMessage(e));
+    } finally {
+      setPending(false);
     }
   };
 
@@ -102,8 +111,12 @@ function SuppliersPage() {
 
     if (hasPurchases || hasCredits) {
       if (confirm(`El proveedor "${s.name}" tiene historial de compras o créditos asociados. ¿Deseas desactivarlo para no perder datos históricos?`)) {
-        await update(s.id, { status: "inactivo" });
-        toast.success("Proveedor marcado como Inactivo");
+        try {
+          await update(s.id, { status: "inactivo" });
+          toast.success("Proveedor marcado como Inactivo");
+        } catch (error) {
+          toast.error(userPersistenceMessage(error));
+        }
       }
       return;
     }
@@ -118,6 +131,7 @@ function SuppliersPage() {
   };
 
   const openPaymentModal = (credit: SupplierCredit) => {
+    setPaymentNeedsReconciliation(false);
     setPaymentCredit(credit);
     setPayAmount(credit.balance);
     setPayDate(new Date().toISOString().slice(0, 10));
@@ -127,46 +141,40 @@ function SuppliersPage() {
   };
 
   const registerPayment = async () => {
-    if (!paymentCredit) return;
-    if (payAmount <= 0) {
-      toast.error("El monto a pagar debe ser mayor que 0");
-      return;
-    }
-    if (payAmount > paymentCredit.balance + 0.01) {
-      toast.error(`El monto no puede superar el saldo pendiente (${fmtMoney(paymentCredit.balance, settings.currency)})`);
-      return;
-    }
-
+    if (pending || paymentNeedsReconciliation || !paymentCredit) return;
+    if (payAmount <= 0) { toast.error("El monto debe ser mayor a 0"); return; }
+    if (payAmount > paymentCredit.balance) { toast.error("El monto no puede superar el saldo pendiente"); return; }
+    setPending(true);
+    const idempotencyKey = paymentRequestKey.current ?? globalThis.crypto.randomUUID();
+    paymentRequestKey.current = idempotencyKey;
     try {
-      const newPaid = paymentCredit.paid + payAmount;
-      const newBalance = Math.max(0, paymentCredit.total - newPaid);
-      const newStatus: CreditStatus = newBalance <= 0.01 ? "pagada" : "parcial";
-
-      // Insert payment record
-      await insertPayment({
-        id: uid(),
-        creditId: paymentCredit.id,
-        creditType: "supplier",
-        amount: payAmount,
-        date: payDate,
-        method: payMethod,
-        reference: payRef,
-        note: payNote,
-        createdAt: new Date().toISOString(),
+      await postBusinessOperation("supplier_payment", {
+        idempotency_key: idempotencyKey, credit_type: "supplier", credit_id: paymentCredit.id,
+        amount: Number(payAmount).toFixed(2), date: payDate, method: payMethod,
+        reference: payRef || null, note: payNote || null,
       });
-
-      // Update credit invoice
-      await updateCredit(paymentCredit.id, {
-        paid: newPaid,
-        balance: newBalance,
-        status: newStatus,
-      });
-
-      toast.success("Pago registrado correctamente");
-      setPaymentCredit(null);
+      paymentRequestKey.current = null;
+      void refreshCredits(); void refreshPayments();
+      toast.success("Pago confirmado"); setPaymentCredit(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al registrar el pago");
-    }
+      const uncertain = e instanceof PersistenceError && e.kind === "uncertain";
+      if (uncertain) setPaymentNeedsReconciliation(true); else paymentRequestKey.current = null;
+      toast.error(userPersistenceMessage(e));
+    } finally { setPending(false); }
+  };
+
+  const reconcilePayment = async () => {
+    const key = paymentRequestKey.current;
+    if (!key || pending) return;
+    setPending(true);
+    try {
+      const result = await getConfirmedBusinessOperation("supplier_payment", key);
+      if (!result) { toast.error("El pago todav?a no aparece confirmado. Conserva la operaci?n y vuelve a consultar."); return; }
+      paymentRequestKey.current = null; setPaymentNeedsReconciliation(false);
+      void refreshCredits(); void refreshPayments();
+      toast.success("Pago confirmado y reconciliado"); setPaymentCredit(null);
+    } catch (error) { toast.error(userPersistenceMessage(error)); }
+    finally { setPending(false); }
   };
 
   const filteredSuppliers = suppliers.filter((s) => {
@@ -188,7 +196,7 @@ function SuppliersPage() {
       )
     : [];
 
-  const totalCreditPurchases = supplierCredits.reduce((acc, c) => acc + c.total, 0);
+  const totalCreditPurchases = supplierCredits.filter((c) => c.status !== "anulada").reduce((acc, c) => acc + c.total, 0);
   const totalCreditPaid = supplierCredits.reduce((acc, c) => acc + c.paid, 0);
   const totalCreditBalance = supplierCredits.reduce((acc, c) => acc + c.balance, 0);
 
@@ -278,9 +286,9 @@ function SuppliersPage() {
                 </Field>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpenForm(false)}>Cancelar</Button>
-                <Button onClick={saveSupplier} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
-                  {editing ? "Guardar cambios" : "Registrar proveedor"}
+                <Button variant="outline" onClick={() => setOpenForm(false)} disabled={pending}>Cancelar</Button>
+                <Button onClick={saveSupplier} disabled={pending} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                  {pending ? "Guardando…" : editing ? "Guardar cambios" : "Registrar proveedor"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -517,7 +525,7 @@ function SuppliersPage() {
       </Dialog>
 
       {/* Payment Registration Modal */}
-      <Dialog open={!!paymentCredit} onOpenChange={(o) => !o && setPaymentCredit(null)}>
+      <Dialog open={!!paymentCredit} onOpenChange={(o) => { if (!o && paymentNeedsReconciliation) return; if (!o) setPaymentCredit(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -595,9 +603,11 @@ function SuppliersPage() {
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPaymentCredit(null)}>Cancelar</Button>
-            <Button onClick={registerPayment} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
-              Confirmar Pago
+            <Button variant="outline" onClick={() => setPaymentCredit(null)} disabled={pending || paymentNeedsReconciliation}>Cancelar</Button>
+            {paymentNeedsReconciliation && <Button variant="outline" onClick={reconcilePayment} disabled={pending}>Consultar operaci?n</Button>}
+            {paymentNeedsReconciliation && <p role="alert" className="text-sm text-destructive">No se recibi? confirmaci?n. No repitas el pago; consulta el resultado con la misma clave.</p>}
+            <Button onClick={registerPayment} disabled={pending || paymentNeedsReconciliation} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+              {pending ? "Guardando…" : paymentNeedsReconciliation ? "Reconciliación requerida" : "Confirmar Pago"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -16,14 +16,15 @@ function Dashboard() {
   const { data: expenses } = useSupabaseTable<Expense>("expenses");
   const [settings] = useSettings();
 
-  const totalRevenue = sales.reduce((s, x) => s + x.total, 0);
+  const activeSales = sales.filter((sale) => !sale.voidedAt);
+  const totalRevenue = activeSales.reduce((s, x) => s + x.total, 0);
   const inventoryValue = inventory.reduce((s, x) => s + x.price * x.quantity, 0);
 
   const currentMonthStr = new Date().toISOString().slice(0, 7);
   const monthExpenses = expenses.filter((e) => e.status === "registrado" && e.date.startsWith(currentMonthStr));
   const monthExpenseTotal = monthExpenses.reduce((s, e) => s + e.amount, 0);
 
-  const recent = [...sales].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
+  const recent = [...activeSales].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
 
   return (
     <div>
@@ -36,7 +37,7 @@ function Dashboard() {
         <StatCard
           label="Ingresos totales"
           value={fmtMoney(totalRevenue, settings.currency)}
-          hint={`${sales.length} ventas registradas`}
+          hint={`${activeSales.length} activas · ${sales.length - activeSales.length} anuladas`}
           icon={<Receipt className="h-5 w-5 text-[#D4AF37]" />}
         />
         <StatCard

@@ -1,32 +1,33 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { useSupabaseTable, uid, fmtMoney, fmtDate } from "@/lib/storage";
+import { useRef, useState } from "react";
+import { useSupabaseTable, useSupabaseView, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
-import type { Sale, SaleLine, Client, InventoryItem } from "@/lib/types";
+import type { Sale, SaleLine } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Trash2, Receipt as ReceiptIcon, Printer, X } from "lucide-react";
+import { Plus, Ban, Receipt as ReceiptIcon, Printer, X } from "lucide-react";
 import { toast } from "sonner";
+import { PersistenceError, userPersistenceMessage } from "@/lib/persistence.js";
+import { getConfirmedBusinessOperation, postBusinessOperation, runFinancialCorrection } from "@/lib/businessOperations";
+import { useAuth } from "@/lib/auth";
+import { clampSaleQuantity } from "@/lib/catalog.js";
 
 export const Route = createFileRoute("/_app/sales")({
   component: SalesPage,
 });
 
-function genReceiptNo() {
-  const d = new Date();
-  return `R-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-}
-
 function SalesPage() {
-  const { data: sales, insert: insertSale, remove: removeSale } = useSupabaseTable<Sale>("sales");
-  const { data: clients } = useSupabaseTable<Client>("clients");
-  const { data: inventory, update: updateInventory } = useSupabaseTable<InventoryItem>("inventory");
-  const { insert: insertClientCredit } = useSupabaseTable<ClientCredit>("client_credits");
+  const { data: sales, refresh: refreshSales } = useSupabaseTable<Sale>("sales");
+  const { data: clients } = useSupabaseView("sales_client_lookup");
+  const { data: inventory, refresh: refreshInventory } = useSupabaseView("sales_inventory_lookup");
+  const requestKey = useRef<string | null>(null);
   const [settings] = useSettings();
+  const { user } = useAuth();
+  const annulKeys = useRef(new Map<string, string>());
 
   const [open, setOpen] = useState(false);
   const [clientId, setClientId] = useState("");
@@ -35,6 +36,8 @@ function SalesPage() {
   const [paymentType, setPaymentType] = useState<"contado" | "credito">("contado");
   const [dueDate, setDueDate] = useState<string>("");
   const [viewing, setViewing] = useState<Sale | null>(null);
+  const [pending, setPending] = useState(false);
+  const [needsReconciliation, setNeedsReconciliation] = useState(false);
 
   const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
   const tax = +(subtotal * (settings.taxRate / 100)).toFixed(2);
@@ -46,6 +49,7 @@ function SalesPage() {
     if (item.quantity < 1) { toast.error("Sin existencia"); return; }
     const existing = lines.find((l) => l.itemId === item.id);
     if (existing) {
+      if (existing.quantity >= item.quantity) { toast.error("La cantidad supera la existencia disponible"); return; }
       setLines(lines.map((l) => l.itemId === item.id ? { ...l, quantity: l.quantity + 1 } : l));
     } else {
       setLines([...lines, { itemId: item.id, sku: item.sku, name: item.name, unitPrice: item.price, quantity: 1 }]);
@@ -54,7 +58,13 @@ function SalesPage() {
   };
 
   const removeLine = (id: string) => setLines(lines.filter((l) => l.itemId !== id));
-  const setQty = (id: string, q: number) => setLines(lines.map((l) => l.itemId === id ? { ...l, quantity: Math.max(1, q) } : l));
+  const setQty = (id: string, requested: number) => {
+    const product = inventory.find((item) => item.id === id);
+    const available = product?.quantity ?? 0;
+    const quantity = clampSaleQuantity(requested, available);
+    if (requested > available) toast.error("La cantidad no puede superar la existencia disponible");
+    setLines(lines.map((line) => line.itemId === id && quantity > 0 ? { ...line, quantity } : line));
+  };
 
   const reset = () => {
     setClientId("");
@@ -65,65 +75,71 @@ function SalesPage() {
   };
 
   const save = async () => {
+    if (pending || needsReconciliation) return;
     if (!clientId) { toast.error("Selecciona un cliente"); return; }
     if (lines.length === 0) { toast.error("Agrega al menos un producto"); return; }
+    setPending(true);
+    const idempotencyKey = requestKey.current ?? globalThis.crypto.randomUUID();
+    requestKey.current = idempotencyKey;
     try {
-      // Deduct inventory quantities
-      await Promise.all(
-        lines.map((ln) => {
-          const item = inventory.find((i) => i.id === ln.itemId);
-          if (item) return updateInventory(item.id, { quantity: Math.max(0, item.quantity - ln.quantity) });
-        }).filter(Boolean),
-      );
+      const result = await postBusinessOperation("sale", {
+        idempotency_key: idempotencyKey, client_id: clientId, payment_type: paymentType,
+        due_date: paymentType === "credito" ? dueDate || null : null,
+        lines: lines.map((line) => ({ item_id: line.itemId, quantity: line.quantity, expected_unit_price: line.unitPrice.toFixed(2) })),
+      });
+      requestKey.current = null;
+      const sale: Sale = { id: String(result.sale_id), receiptNo: String(result.receipt_no), clientId, lines,
+        subtotal: Number(result.subtotal), taxRate: Number(result.tax_rate ?? 0), tax: Number(result.tax), total: Number(result.total),
+        paymentType, dueDate: paymentType === "credito" ? dueDate : undefined, createdAt: new Date().toISOString() };
+      void refreshSales();
+      void refreshInventory();
+      toast.success(paymentType === "credito" ? "Venta y cuenta por cobrar confirmadas" : "Venta confirmada");
+      setOpen(false); reset(); setViewing(sale);
+    } catch (e) {
+      const uncertain = e instanceof PersistenceError && e.kind === "uncertain";
+      if (uncertain) setNeedsReconciliation(true); else requestKey.current = null;
+      toast.error(userPersistenceMessage(e));
+    } finally { setPending(false); }
+  };
 
-      const saleId = uid();
-      const receiptNo = genReceiptNo();
+  const reconcileSale = async () => {
+    const key = requestKey.current;
+    if (!key || pending) return;
+    setPending(true);
+    try {
+      const result = await getConfirmedBusinessOperation("sale", key);
+      if (!result) { toast.error("La operación todavía no aparece confirmada. Conserva este formulario y vuelve a consultar."); return; }
+      const savedLines = Array.isArray(result.lines) ? result.lines as Array<Record<string, unknown>> : [];
       const sale: Sale = {
-        id: saleId,
-        receiptNo,
-        clientId,
-        lines,
-        subtotal,
-        taxRate: settings.taxRate,
-        tax,
-        total,
-        paymentType,
-        dueDate: paymentType === "credito" ? dueDate : undefined,
+        id: String(result.sale_id), receiptNo: String(result.receipt_no), clientId: String(result.client_id),
+        lines: savedLines.map((line) => ({
+          itemId: String(line.item_id), sku: String(line.sku), name: String(line.name),
+          unitPrice: Number(line.unit_price), quantity: Number(line.quantity),
+        })),
+        subtotal: Number(result.subtotal), taxRate: Number(result.tax_rate), tax: Number(result.tax), total: Number(result.total),
+        paymentType: result.payment_type === "credito" ? "credito" : "contado",
+        dueDate: typeof result.due_date === "string" ? result.due_date : undefined,
         createdAt: new Date().toISOString(),
       };
-      await insertSale(sale);
-
-      // If sale is on Credit, automatically generate a ClientCredit (Cuenta por Cobrar)
-      if (paymentType === "credito") {
-        await insertClientCredit({
-          id: uid(),
-          saleId,
-          clientId,
-          receiptNo,
-          total,
-          paid: 0,
-          balance: total,
-          status: "pendiente",
-          dueDate: dueDate || undefined,
-          createdAt: new Date().toISOString(),
-        });
-        toast.success("Venta a crédito registrada y cuenta por cobrar creada");
-      } else {
-        toast.success("Venta registrada");
-      }
-
-      setOpen(false);
-      reset();
-      setViewing(sale);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al registrar venta");
-    }
+      requestKey.current = null; setNeedsReconciliation(false);
+      void refreshSales(); void refreshInventory();
+      toast.success("Venta confirmada y reconciliada"); setOpen(false); reset(); setViewing(sale);
+    } catch (error) {
+      toast.error(userPersistenceMessage(error));
+    } finally { setPending(false); }
   };
 
   const remove = async (id: string) => {
-    if (!confirm("¿Eliminar esta venta? El inventario no se restaurará.")) return;
+    if (user?.role !== "admin") { toast.error("Solo un administrador activo puede anular ventas."); return; }
+    const reason = window.prompt("Motivo obligatorio para anular esta venta:");
+    if (!reason?.trim()) { toast.error("La anulación requiere un motivo."); return; }
     try {
-      await removeSale(id);
+      const key = annulKeys.current.get(id) ?? globalThis.crypto.randomUUID();
+      annulKeys.current.set(id, key);
+      await runFinancialCorrection("financial_annulment", { idempotency_key: key, document_type: "sale", document_id: id, reason: reason.trim() });
+      annulKeys.current.delete(id);
+      void refreshSales(); void refreshInventory();
+      toast.success("Venta anulada con compensación persistida");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error al eliminar");
     }
@@ -137,7 +153,7 @@ function SalesPage() {
         title="Ventas"
         description="Emite recibos, controla ingresos y registra ventas a contado o crédito."
         actions={
-          <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
+          <Dialog open={open} onOpenChange={(o) => { if (!o && needsReconciliation) return; setOpen(o); if (!o) reset(); }}>
             <DialogTrigger asChild>
               <Button className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
                 <Plus className="h-4 w-4 mr-1.5" /> Nueva venta
@@ -210,7 +226,7 @@ function SalesPage() {
                             <td className="px-3 py-2"><div className="font-medium">{l.name}</div><div className="text-xs text-muted-foreground font-mono">{l.sku}</div></td>
                             <td className="px-3 py-2 text-right font-mono">{fmtMoney(l.unitPrice, settings.currency)}</td>
                             <td className="px-3 py-2 text-right">
-                              <Input type="number" min={1} value={l.quantity} onChange={(e) => setQty(l.itemId, +e.target.value)} className="h-8 w-16 ml-auto text-right" />
+                          <Input type="number" min={1} max={inventory.find((item) => item.id === l.itemId)?.quantity ?? 1} value={l.quantity} onChange={(e) => setQty(l.itemId, +e.target.value)} className="h-8 w-16 ml-auto text-right" aria-label={`Cantidad de ${l.name}`} />
                             </td>
                             <td className="px-3 py-2 text-right font-mono">{fmtMoney(l.unitPrice * l.quantity, settings.currency)}</td>
                             <td className="px-3 py-2"><Button size="icon" variant="ghost" onClick={() => removeLine(l.itemId)}><X className="h-4 w-4" /></Button></td>
@@ -225,12 +241,18 @@ function SalesPage() {
                   <Row label="Subtotal" value={fmtMoney(subtotal, settings.currency)} />
                   <Row label={`Impuesto (${settings.taxRate}%)`} value={fmtMoney(tax, settings.currency)} />
                   <div className="h-px bg-border my-1" />
-                  <Row label="Total" value={fmtMoney(total, settings.currency)} bold />
+                  <Row label="Estimado" value={fmtMoney(total, settings.currency)} bold />
+                  <p className="text-xs text-muted-foreground">El servidor calculará y confirmará el importe antes de registrar la venta.</p>
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-                <Button onClick={save} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">Registrar venta</Button>
+                <Button variant="outline" onClick={() => setOpen(false)} disabled={pending || needsReconciliation}>Cancelar</Button>
+                <p role="status" className="mr-auto text-sm text-muted-foreground">Venta, stock y crédito se confirman en una operación.</p>
+                {needsReconciliation && <p role="alert" className="text-sm text-destructive">No se recibió confirmación. No repitas la venta; consulta el resultado con la misma clave.</p>}
+                {needsReconciliation && <Button variant="outline" onClick={reconcileSale} disabled={pending}>Consultar operación</Button>}
+                <Button onClick={save} disabled={pending || needsReconciliation} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                  {pending ? "Confirmando…" : "Confirmar venta"}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -262,7 +284,7 @@ function SalesPage() {
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <Button size="icon" variant="ghost" onClick={() => setViewing(s)} title="Recibo"><ReceiptIcon className="h-4 w-4" /></Button>
-                    <Button size="icon" variant="ghost" onClick={() => remove(s.id)}><Trash2 className="h-4 w-4" /></Button>
+                    {s.voidedAt ? <span className="px-2 text-xs text-rose-400">Anulada</span> : user?.role === "admin" && <Button size="icon" variant="ghost" onClick={() => remove(s.id)} title="Anular venta"><Ban className="h-4 w-4" /></Button>}
                   </div>
                 </td>
               </tr>
@@ -286,7 +308,7 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
 
 function ReceiptDialog({ sale, onClose }: { sale: Sale | null; onClose: () => void }) {
   const [settings] = useSettings();
-  const { data: clients } = useSupabaseTable<Client>("clients");
+  const { data: clients } = useSupabaseView("sales_client_lookup");
   if (!sale) return null;
   const client = clients.find((c) => c.id === sale.clientId);
   return (
@@ -303,8 +325,6 @@ function ReceiptDialog({ sale, onClose }: { sale: Sale | null; onClose: () => vo
             <div>
               <div className="text-gray-500 uppercase tracking-wider">Cliente</div>
               <div className="font-medium text-sm">{client?.name || "Mostrador"}</div>
-              {client?.email && <div>{client.email}</div>}
-              {client?.phone && <div>{client.phone}</div>}
             </div>
             <div className="text-right">
               <div className="text-gray-500 uppercase tracking-wider">Recibo</div>

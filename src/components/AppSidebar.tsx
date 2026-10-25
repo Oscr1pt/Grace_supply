@@ -102,7 +102,7 @@ export function AppSidebar() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={logout}
+          onClick={() => void logout()}
           className="w-full mt-3 justify-start text-neutral-400 hover:bg-[#171717] hover:text-[#FF6B6B] h-9 border border-[#262626]"
         >
           <LogOut className="h-4 w-4 mr-2" />

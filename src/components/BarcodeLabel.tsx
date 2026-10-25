@@ -1,4 +1,5 @@
 import { Barcode } from "@/components/Barcode";
+import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -6,16 +7,33 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { labelPresets } from "@/lib/settings";
 import { fmtMoney } from "@/lib/storage";
 import type { InventoryItem, Settings } from "@/lib/types";
+import { getBarcodeProductDetails } from "@/lib/catalog.js";
 
 export function LabelSizeControls({
   settings,
   onChange,
+  disabled = false,
 }: {
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
+  disabled?: boolean;
 }) {
+  const [draft, setDraft] = useState<Partial<Settings>>({});
+  const visibleSettings = { ...settings, ...draft };
+  const change = (patch: Partial<Settings>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+    onChange(patch);
+  };
+
+  useEffect(() => {
+    setDraft((current) => {
+      const pendingKeys = Object.keys(current) as (keyof Settings)[];
+      return pendingKeys.every((key) => current[key] === settings[key]) ? {} : current;
+    });
+  }, [settings]);
+
   const activePreset = labelPresets.find(
-    (p) => p.widthMm === settings.labelWidthMm && p.heightMm === settings.labelHeightMm,
+    (p) => p.widthMm === visibleSettings.labelWidthMm && p.heightMm === visibleSettings.labelHeightMm,
   )?.key;
 
   return (
@@ -24,10 +42,11 @@ export function LabelSizeControls({
         <Label>Tamaño de etiqueta</Label>
         <Select
           value={activePreset ?? "custom"}
+          disabled={disabled}
           onValueChange={(v) => {
             const p = labelPresets.find((x) => x.key === v);
             if (!p) return;
-            onChange({
+            change({
               labelWidthMm: p.widthMm,
               labelHeightMm: p.heightMm,
               labelBarWidth: p.barWidth,
@@ -48,40 +67,37 @@ export function LabelSizeControls({
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label>Ancho (mm)</Label>
-          <Input type="number" min={10} max={150} value={settings.labelWidthMm}
-            onChange={(e) => onChange({ labelWidthMm: Math.min(150, Math.max(10, +e.target.value || 0)) })} />
+          <Input type="number" min={10} max={150} value={visibleSettings.labelWidthMm} disabled={disabled}
+            onChange={(e) => change({ labelWidthMm: Math.min(150, Math.max(10, +e.target.value || 0)) })} />
         </div>
         <div className="space-y-1.5">
           <Label>Alto (mm)</Label>
-          <Input type="number" min={8} max={100} value={settings.labelHeightMm}
-            onChange={(e) => onChange({ labelHeightMm: Math.min(100, Math.max(8, +e.target.value || 0)) })} />
+          <Input type="number" min={8} max={100} value={visibleSettings.labelHeightMm} disabled={disabled}
+            onChange={(e) => change({ labelHeightMm: Math.min(100, Math.max(8, +e.target.value || 0)) })} />
         </div>
         <div className="space-y-1.5">
           <Label>Grosor de barras</Label>
-          <Input type="number" step="0.1" min={0.6} max={5} value={settings.labelBarWidth}
-            onChange={(e) => onChange({ labelBarWidth: Math.min(5, Math.max(0.6, +e.target.value || 0)) })} />
+          <Input type="number" step="0.1" min={0.6} max={5} value={visibleSettings.labelBarWidth} disabled={disabled}
+            onChange={(e) => change({ labelBarWidth: Math.min(5, Math.max(0.6, +e.target.value || 0)) })} />
         </div>
         <div className="space-y-1.5">
           <Label>Alto de barras (px)</Label>
-          <Input type="number" min={15} max={120} value={settings.labelBarHeight}
-            onChange={(e) => onChange({ labelBarHeight: Math.min(120, Math.max(15, +e.target.value || 0)) })} />
+          <Input type="number" min={15} max={120} value={visibleSettings.labelBarHeight} disabled={disabled}
+            onChange={(e) => change({ labelBarHeight: Math.min(120, Math.max(15, +e.target.value || 0)) })} />
         </div>
       </div>
 
       <div className="flex items-center justify-between pt-1">
         <Label htmlFor="label-price">Mostrar precio en la etiqueta</Label>
-        <Switch id="label-price" checked={settings.labelShowPrice}
-          onCheckedChange={(c) => onChange({ labelShowPrice: c })} />
+        <Switch id="label-price" checked={visibleSettings.labelShowPrice} disabled={disabled}
+          onCheckedChange={(c) => change({ labelShowPrice: c })} />
       </div>
     </div>
   );
 }
 
 export function BarcodeLabel({ item, settings }: { item: InventoryItem; settings: Settings }) {
-  const specs =
-    item.kind === "piedra"
-      ? `${item.stone || "Piedra"} ${item.stoneCarats || 0}ct`
-      : `${item.karat || ""} ${item.metal || ""}`.trim();
+  const specs = getBarcodeProductDetails(item);
   const compact = settings.labelHeightMm < 18;
 
   return (

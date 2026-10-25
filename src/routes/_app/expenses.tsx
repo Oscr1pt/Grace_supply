@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { useSupabaseTable, uid, fmtMoney, fmtDate } from "@/lib/storage";
+import { useRef, useState } from "react";
+import { useSupabaseTable, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import { useAuth } from "@/lib/auth";
 import type {
@@ -16,8 +16,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Pencil, Search, Filter, Wallet, Calendar, DollarSign, Eye, Ban, CheckCircle2, TrendingDown, PieChart, User } from "lucide-react";
+import { Plus, Search, Filter, Wallet, Calendar, DollarSign, Eye, Ban, CheckCircle2, TrendingDown, PieChart, User } from "lucide-react";
 import { toast } from "sonner";
+import { userPersistenceMessage } from "@/lib/persistence.js";
+import { postBusinessOperation, runFinancialCorrection } from "@/lib/businessOperations";
 
 export const Route = createFileRoute("/_app/expenses")({
   component: ExpensesPage,
@@ -57,14 +59,16 @@ const emptyExpense: Omit<Expense, "id" | "createdAt"> = {
 };
 
 function ExpensesPage() {
-  const { data: expenses, insert, update } = useSupabaseTable<Expense>("expenses");
+  const { data: expenses, refresh } = useSupabaseTable<Expense>("expenses");
   const [settings] = useSettings();
   const { user } = useAuth();
 
   const [openForm, setOpenForm] = useState(false);
-  const [editing, setEditing] = useState<Expense | null>(null);
   const [viewing, setViewing] = useState<Expense | null>(null);
   const [form, setForm] = useState(emptyExpense);
+  const [pending, setPending] = useState(false);
+  const expenseKey = useRef<string | null>(null);
+  const correctionKeys = useRef(new Map<string, string>());
 
   // Filters
   const [q, setQ] = useState("");
@@ -75,7 +79,6 @@ function ExpensesPage() {
   const [dateTo, setDateTo] = useState<string>("");
 
   const startNew = () => {
-    setEditing(null);
     setForm({
       ...emptyExpense,
       date: new Date().toISOString().slice(0, 10),
@@ -84,17 +87,8 @@ function ExpensesPage() {
     setOpenForm(true);
   };
 
-  const startEdit = (e: Expense) => {
-    if (e.status === "anulado") {
-      toast.error("No se puede editar un gasto anulado.");
-      return;
-    }
-    setEditing(e);
-    setForm({ ...emptyExpense, ...e });
-    setOpenForm(true);
-  };
-
   const saveExpense = async () => {
+    if (pending) return;
     if (!form.concept.trim()) {
       toast.error("El concepto del gasto es obligatorio");
       return;
@@ -108,44 +102,42 @@ function ExpensesPage() {
       return;
     }
 
+    setPending(true);
     try {
-      const now = new Date().toISOString();
-      const currentUser = user?.name || user?.username || "Administrador";
-
-      if (editing) {
-        await update(editing.id, {
-          ...form,
-          updatedAt: now,
-        });
-        toast.success("Gasto actualizado");
-      } else {
-        await insert({
-          id: uid(),
-          ...form,
-          registeredBy: currentUser,
-          createdAt: now,
-        });
-        toast.success("Gasto registrado");
-      }
+      const idempotencyKey = expenseKey.current ?? globalThis.crypto.randomUUID();
+      expenseKey.current = idempotencyKey;
+      await postBusinessOperation("expense", {
+        idempotency_key: idempotencyKey, concept: form.concept, category: form.category,
+        description: form.description, amount: Number(form.amount).toFixed(2), date: form.date,
+        payment_method: form.paymentMethod, beneficiary: form.beneficiary, reference: form.reference ?? null, note: form.note ?? null,
+      });
+      expenseKey.current = null;
+      void refresh();
+      toast.success("Gasto registrado y persistido");
       setOpenForm(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Error al guardar el gasto");
+      toast.error(userPersistenceMessage(e));
+    } finally {
+      setPending(false);
     }
   };
 
   const annulExpense = async (e: Expense) => {
+    if (user?.role !== "admin") { toast.error("Solo un administrador activo puede anular gastos."); return; }
     if (e.status === "anulado") return;
-    if (!confirm(`¿Anular el gasto "${e.concept}" por ${fmtMoney(e.amount, settings.currency)}? El registro se conservará como anulado para auditoría.`)) {
-      return;
-    }
+    const reason = window.prompt(`Motivo obligatorio para anular "${e.concept}" (${fmtMoney(e.amount, settings.currency)}):`);
+    if (!reason?.trim()) { toast.error("La anulación requiere un motivo."); return; }
     try {
-      await update(e.id, {
-        status: "anulado",
-        updatedAt: new Date().toISOString(),
+      const key = correctionKeys.current.get(e.id) ?? globalThis.crypto.randomUUID();
+      correctionKeys.current.set(e.id, key);
+      await runFinancialCorrection("financial_annulment", {
+        idempotency_key: key, document_type: "expense", document_id: e.id, reason: reason.trim(),
       });
+      correctionKeys.current.delete(e.id);
+      void refresh();
       toast.success("Gasto anulado correctamente");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al anular gasto");
+      toast.error(userPersistenceMessage(err));
     }
   };
 
@@ -204,7 +196,7 @@ function ExpensesPage() {
             </DialogTrigger>
             <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>{editing ? "Editar gasto" : "Registrar nuevo gasto"}</DialogTitle>
+                <DialogTitle>Registrar nuevo gasto</DialogTitle>
               </DialogHeader>
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -271,9 +263,9 @@ function ExpensesPage() {
                 </Field>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpenForm(false)}>Cancelar</Button>
-                <Button onClick={saveExpense} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
-                  {editing ? "Guardar cambios" : "Registrar gasto"}
+                <Button variant="outline" onClick={() => setOpenForm(false)} disabled={pending}>Cancelar</Button>
+                <Button onClick={saveExpense} disabled={pending} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                  {pending ? "Guardando…" : "Registrar gasto"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -448,9 +440,6 @@ function ExpensesPage() {
                       </Button>
                       {e.status === "registrado" && (
                         <>
-                          <Button size="icon" variant="ghost" onClick={() => startEdit(e)} title="Editar" className="h-8 w-8 hover:text-[#D4AF37]">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
                           <Button size="icon" variant="ghost" onClick={() => annulExpense(e)} title="Anular gasto" className="h-8 w-8 hover:text-rose-400">
                             <Ban className="h-3.5 w-3.5" />
                           </Button>

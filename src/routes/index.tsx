@@ -6,6 +6,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const { user } = useAuth();
+  const { user, passwordSetupStatus } = useAuth();
+  if (passwordSetupStatus !== "none" && passwordSetupStatus !== "complete") return <Navigate to="/reset-password" replace />;
   return <Navigate to={user ? "/dashboard" : "/login"} replace />;
 }
