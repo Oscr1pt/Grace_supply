@@ -14,6 +14,7 @@ import {
   serializeMutation,
   setReadFailure,
   userPersistenceMessage,
+  type PersistenceErrorKind,
 } from "./persistence.js";
 
 type DomainTable = keyof Database["public"]["Tables"];
@@ -42,11 +43,14 @@ export function useSupabaseTable<T extends { id: string }>(
   table: DomainTable,
   orderBy = "created_at",
   orderAsc = false,
+  selectColumns = "*",
+  enabled = true,
 ) {
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [stale, setStale] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadErrorKind, setLoadErrorKind] = useState<PersistenceErrorKind | null>(null);
   const { scopeKey } = useAuth();
   const requestGuard = useRef(createRequestGuard());
   const scopeGuard = useRef(createScopeRequestGuard(scopeKey));
@@ -67,7 +71,7 @@ export function useSupabaseTable<T extends { id: string }>(
     try {
       const { data: rows, error } = await supabase
         .from(table)
-        .select("*")
+        .select(selectColumns as "*")
         .order(orderBy, { ascending: orderAsc })
         .abortSignal(controller.signal);
       if (error) throw persistenceFailure(error);
@@ -96,26 +100,39 @@ export function useSupabaseTable<T extends { id: string }>(
       setData(parsed);
       setStale(false);
       setLoadError(null);
+      setLoadErrorKind(null);
       setReadFailure(table, null);
     } catch (error) {
       if (!isCurrent()) return;
-      if (persistenceFailure(error).kind === "denied") setData([]);
-      const message = userPersistenceMessage(error);
+      const failure = persistenceFailure(error);
+      if (failure.kind === "denied") setData([]);
+      const message = userPersistenceMessage(failure);
       setLoadError(message);
+      setLoadErrorKind(failure.kind);
       setStale(true);
       setReadFailure(table, message);
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [table, orderBy, orderAsc, scopeKey]);
+  }, [table, orderBy, orderAsc, selectColumns, scopeKey]);
 
   useEffect(() => {
+    if (!enabled) {
+      abortController.current?.abort();
+      requestGuard.current.begin();
+      setData([]);
+      setLoading(false);
+      setStale(true);
+      setLoadError(null);
+      setLoadErrorKind(null);
+      return;
+    }
     void refresh();
     return () => {
       abortController.current?.abort();
       requestGuard.current.begin();
     };
-  }, [refresh]);
+  }, [refresh, enabled]);
 
   const insert = useCallback(
     async (item: T) => {
@@ -217,7 +234,18 @@ export function useSupabaseTable<T extends { id: string }>(
     [table],
   );
 
-  return { data, loading, stale, loadError, insert, update, remove, refresh, setData };
+  return {
+    data,
+    loading,
+    stale,
+    loadError,
+    loadErrorKind,
+    insert,
+    update,
+    remove,
+    refresh,
+    setData,
+  };
 }
 
 /** Read-only, non-cached access to the least-privilege lookup views in CHG-05. */

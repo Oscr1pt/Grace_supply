@@ -29,12 +29,16 @@ export function StatCard({
   icon,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   hint?: string;
   icon?: ReactNode;
 }) {
   return (
-    <div className="group rounded-xl border border-border bg-card p-5 transition-all duration-200 hover:border-[#D4AF37]/60 hover:shadow-md hover:shadow-[#D4AF37]/5">
+    <div
+      role="group"
+      aria-label={label}
+      className="group min-w-0 rounded-xl border border-border bg-card p-5 transition-all duration-200 hover:border-[#D4AF37]/60 hover:shadow-md hover:shadow-[#D4AF37]/5"
+    >
       <div className="flex items-center justify-between">
         <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
@@ -45,7 +49,7 @@ export function StatCard({
           </div>
         )}
       </div>
-      <div className="mt-3 text-3xl font-display font-semibold tracking-tight text-foreground group-hover:text-[#D4AF37] transition-colors">
+      <div className="mt-3 min-w-0 break-words text-2xl font-display font-semibold tracking-tight text-foreground transition-colors group-hover:text-[#D4AF37] sm:text-3xl">
         {value}
       </div>
       {hint && <div className="text-xs text-muted-foreground mt-1 font-medium">{hint}</div>}
