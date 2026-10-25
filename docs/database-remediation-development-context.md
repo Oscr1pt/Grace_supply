@@ -1,6 +1,6 @@
 # Grace Supply — Estado real del proyecto y decisiones de desarrollo
 
-**Actualizado:** 2026-10-20 (hora local de República Dominicana; confirmado por el propietario en conversación)  
+**Actualizado:** 2026-10-24 (hora local de República Dominicana)
 **Repositorio:** `Oscr1pt/Grace_supply`  
 **Rama de trabajo:** `feature/database-remediation`  
 **Estado:** criterios de planificación; este documento no autoriza escrituras a Supabase.
@@ -9,7 +9,7 @@
 
 1. **Grace Supply aún está en desarrollo.** No se ha publicado en un dominio, no está en producción, no ha sido entregado a su cliente y no tiene usuarios finales operando.
 2. **La base de datos actual contiene solamente registros de prueba.** Su conservación histórica no es necesaria: el propietario acepta que estos datos de prueba pueden descartarse durante la preparación del producto, previa revisión de alcance y autorización explícita antes de ejecutar acciones destructivas.
-3. El destino GitHub correcto es `Oscr1pt/Grace_supply`. El propietario informa haber corregido el remote local `origin`. Codex debe volver a comprobarlo; las referencias anteriores a `Oscr1pt/Imperio_gold.git` en los artefactos son **observaciones históricas ya comunicadas como resueltas**, no prueba de que el error siga presente.
+3. El destino GitHub correcto es `Oscr1pt/Grace_supply`; el 2026-10-24 se verificó que el remote local `origin` apunta a `https://github.com/Oscr1pt/Grace_supply.git`. La incidencia anterior de URL incorrecta está resuelta y no se debe reutilizar.
 4. No se implementará integración con DGII, NCF ni e-CF en esta entrega. Los recibos son internos.
 5. Se conservará el **inicio de sesión mediante nombre de usuario y contraseña**, respaldado por **Supabase Auth**; el identificador username no sustituye el identificador nativo de Auth. El backend hará la vinculación segura y verificará la contraseña mediante el servicio de Auth. El correo de recuperación podrá asignarse; **aún debe decidirse si cada empleado dispondrá de un buzón individual controlado por él o si habrá recuperación asistida por el administrador**.
 
