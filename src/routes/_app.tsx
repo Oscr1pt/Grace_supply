@@ -36,10 +36,10 @@ function AppLayout() {
   const allowed = adminOnly ? isAdmin : perm ? can(perm) : true;
 
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className="min-h-screen flex flex-col bg-background lg:flex-row">
       <AppSidebar />
-      <main className="flex-1 overflow-auto">
-        <div className="max-w-7xl mx-auto px-8 py-10">
+      <main className="min-w-0 flex-1">
+        <div className="mx-auto min-w-0 w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
           {readFailures.length > 0 && (
             <div role="alert" aria-live="polite" className="mb-5 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
               <p className="font-medium">Hay datos que no se pudieron actualizar.</p>
@@ -59,7 +59,7 @@ function AppLayout() {
 
 function NoAccess() {
   return (
-    <div className="rounded-lg border border-border bg-card p-10 text-center max-w-lg mx-auto">
+    <div className="mx-auto max-w-lg rounded-lg border border-border bg-card p-6 text-center sm:p-10">
       <h2 className="font-display text-2xl">Acceso restringido</h2>
       <p className="text-sm text-muted-foreground mt-2">
         Tu cuenta no tiene permiso para ver esta sección. Contacta al administrador de la tienda.
