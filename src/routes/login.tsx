@@ -15,7 +15,7 @@ export const Route = createFileRoute("/login")({
 const accountRecoveryEnabled = import.meta.env.VITE_ACCOUNT_RECOVERY_ENABLED === "true";
 
 function LoginPage() {
-  const { user, authReady, login } = useAuth();
+  const { user, authReady, login, passwordSetupStatus } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -23,8 +23,12 @@ function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (passwordSetupStatus !== "none" && passwordSetupStatus !== "complete") {
+      navigate({ to: "/reset-password", replace: true });
+      return;
+    }
     if (user) navigate({ to: "/dashboard" });
-  }, [user, navigate]);
+  }, [passwordSetupStatus, user, navigate]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

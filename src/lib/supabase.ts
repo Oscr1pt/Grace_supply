@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
+import { initialAuthCallback } from "./authCallback.js";
 
 function getEnvVar(name: string): string | undefined {
   if (typeof import.meta !== "undefined" && import.meta.env) {
@@ -60,7 +61,7 @@ const tabSessionStorage = {
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: tabSessionStorage,
-    flowType: "pkce",
+    flowType: initialAuthCallback.flowType,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,

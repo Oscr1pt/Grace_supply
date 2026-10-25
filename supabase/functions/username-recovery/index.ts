@@ -11,7 +11,10 @@ const service = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 const auth = createClient(supabaseUrl, anonKey, {
-  auth: { autoRefreshToken: false, persistSession: false },
+  // This server-created recovery email has no browser-held PKCE verifier.
+  // Use Supabase's implicit callback so the verified Auth session returns in
+  // the email link and the recipient can update the same identity's password.
+  auth: { flowType: "implicit", autoRefreshToken: false, persistSession: false },
 });
 
 function redirectUrl() {
@@ -22,6 +25,10 @@ function redirectUrl() {
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
     ...(Deno.env.get("APP_ALLOWED_ORIGINS") ?? "").split(",").map((origin) => origin.trim()).filter(Boolean),
   ]);
   if (!allowedOrigins.has(url.origin)) throw new Error("Recovery redirect origin is not allow-listed");
@@ -46,11 +53,13 @@ Deno.serve(async (request: Request) => {
   try {
     const { data: profile, error: profileError } = await service
       .from("user_profiles")
-      .select("auth_user_id, active")
+      .select("auth_user_id, active, role")
       .eq("normalized_username", username)
       .maybeSingle();
     if (profileError) throw profileError;
-    if (profile?.active) {
+    // A confirmed bootstrap administrator may need a recovery link before the
+    // owner activates the profile. Recovery changes only the Auth password.
+    if (profile && (profile.active || profile.role === "admin")) {
       const { data: identity, error: identityError } = await service.auth.admin.getUserById(profile.auth_user_id);
       if (identityError) throw identityError;
       const candidate = identity.user?.email;

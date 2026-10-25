@@ -4,6 +4,7 @@ import { useRouter } from "@tanstack/react-router";
 import type { Session } from "@supabase/supabase-js";
 import type { UUID } from "./database.types";
 import { clearLegacyLocalSessionAndDataCache, supabase } from "./supabase";
+import { initialAuthCallback } from "./authCallback.js";
 import { setReadFailure, userPersistenceMessage } from "./persistence.js";
 import { createAuthorizationScopeKey } from "./sessionScope.js";
 
@@ -29,6 +30,9 @@ type AuthCtx = {
   user: User | null;
   users: User[];
   authReady: boolean;
+  passwordSetupStatus: "none" | "pending" | "ready" | "error" | "complete";
+  passwordSetupError: string | null;
+  completePasswordSetup: () => void;
   scopeKey: string;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -66,12 +70,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [authReady, setAuthReady] = useState(false);
+  // Keep the server render and the browser's first render identical. Callback
+  // state is derived after hydration so SSR cannot disagree with window.location.
+  const [passwordSetupStatus, setPasswordSetupStatus] = useState<"none" | "pending" | "ready" | "error" | "complete">("none");
+  const [passwordSetupError, setPasswordSetupError] = useState<string | null>(null);
   const [cacheGeneration, setCacheGeneration] = useState(0);
   const currentIdentity = useRef<string | null>(null);
   const currentAuthorizationKey = useRef("anonymous");
   const authRevision = useRef(0);
   const initializedAuth = useRef(false);
   const invalidationChannel = useRef<BroadcastChannel | null>(null);
+  const passwordSetupIdentity = useRef<string | null>(null);
 
   const loadCurrentProfile = useCallback(async () => {
     const { data: authResult, error: authError } = await supabase.auth.getUser();
@@ -132,6 +141,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!profile) {
       const { data: currentSession } = await supabase.auth.getSession();
       if (revision !== authRevision.current || currentSession.session?.user.id !== session.user.id) return;
+      if (passwordSetupIdentity.current === session.user.id) {
+        const changed = !initializedAuth.current || currentIdentity.current !== null;
+        if (changed) {
+          clearLegacyLocalSessionAndDataCache();
+          setCacheGeneration((generation) => generation + 1);
+        }
+        currentIdentity.current = null;
+        currentAuthorizationKey.current = "anonymous";
+        initializedAuth.current = true;
+        setUser(null);
+        setUsers([]);
+        setAuthReady(true);
+        return;
+      }
       await supabase.auth.signOut({ scope: "local" });
       return;
     }
@@ -171,16 +194,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [acceptSession]);
 
   useEffect(() => {
+    if (initialAuthCallback.present) {
+      setPasswordSetupError(initialAuthCallback.hasError ? "El enlace venció, ya fue utilizado o no es válido." : null);
+      setPasswordSetupStatus(initialAuthCallback.hasError ? "error" : "pending");
+    }
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "TOKEN_REFRESHED") return;
+      const isVerifiedCallbackSession = event === "SIGNED_IN" || event === "PASSWORD_RECOVERY" || (
+        event === "INITIAL_SESSION" && initialAuthCallback.present && !initialAuthCallback.hasError
+      );
+      if (initialAuthCallback.present && !initialAuthCallback.hasError && session?.user && isVerifiedCallbackSession) {
+        passwordSetupIdentity.current = session.user.id;
+      }
       const revision = ++authRevision.current;
-      queueMicrotask(() => void acceptSession(session, revision, true));
+      // Do not start another Supabase Auth request in the callback's microtask
+      // queue: auth-js may still hold its internal lock until this callback
+      // returns. Deferring one task keeps getUser/getSession from blocking the
+      // next updateUser call on password-recovery callbacks.
+      window.setTimeout(() => {
+        void (async () => {
+          await acceptSession(session, revision, true);
+          if (
+            revision === authRevision.current && isVerifiedCallbackSession &&
+            initialAuthCallback.present && !initialAuthCallback.hasError &&
+            session?.user && passwordSetupIdentity.current === session.user.id
+          ) {
+            setPasswordSetupError(null);
+            setPasswordSetupStatus("ready");
+          }
+        })();
+      }, 0);
     });
     const initialRevision = authRevision.current;
     void supabase.auth.getSession().then(({ data, error }) => {
       if (initialRevision !== authRevision.current) return;
-      if (error) return void acceptSession(null, initialRevision);
-      return acceptSession(data.session, initialRevision);
+      if (error) {
+        void acceptSession(null, initialRevision);
+        if (initialAuthCallback.present && !initialAuthCallback.hasError && !passwordSetupIdentity.current) {
+          setPasswordSetupError("El enlace venció, ya fue utilizado o no es válido.");
+          setPasswordSetupStatus("error");
+        }
+        return;
+      }
+      if (initialAuthCallback.present && !initialAuthCallback.hasError && !passwordSetupIdentity.current) {
+        setPasswordSetupError("El enlace venció, ya fue utilizado o no es válido.");
+        setPasswordSetupStatus("error");
+      }
+      void acceptSession(data.session, initialRevision);
     });
     return () => {
       authListener.subscription.unsubscribe();
@@ -318,13 +378,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [announceInvalidation, refreshUsers]);
 
   const isAdmin = user?.role === "admin";
+  const completePasswordSetup = useCallback(() => {
+    setPasswordSetupError(null);
+    setPasswordSetupStatus("complete");
+  }, []);
   const can = useCallback(
     (permission: Permission) => Boolean(user && (user.role === "admin" || user.permissions.includes(permission))),
     [user],
   );
 
   return (
-    <Ctx.Provider value={{ user, users, authReady, scopeKey, login, logout, can, isAdmin, updateEmployee, removeEmployee, inviteEmployee, activateEmployee }}>
+    <Ctx.Provider value={{ user, users, authReady, passwordSetupStatus, passwordSetupError, completePasswordSetup, scopeKey, login, logout, can, isAdmin, updateEmployee, removeEmployee, inviteEmployee, activateEmployee }}>
       <Fragment key={scopeKey}>{children}</Fragment>
     </Ctx.Provider>
   );

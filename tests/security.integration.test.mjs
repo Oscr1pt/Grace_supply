@@ -465,13 +465,23 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
     const inventoryActor = await signedIn(identities.inventory);
     const newInventoryId = crypto.randomUUID();
     const inventoryInsert = await inventoryActor.from("inventory").insert({
-      id: newInventoryId, sku: `CRUD-${suffix}`, kind: "joya", name: "Synthetic CRUD item", category: "otro",
-    }).select("id,name").single();
+      id: newInventoryId, sku: `CRUD-${suffix}`, name: "Synthetic CRUD item",
+      category: `Categoría personalizada ${suffix}`, description: "Descripción sintética",
+      brand: "Grace Supply test", presentation: "250 ml", unit: "botella",
+      attributes: { variant: "sin fragancia" }, is_active: true,
+    }).select("id,name,category,description,brand,presentation,unit,attributes,is_active").single();
     assert.ifError(inventoryInsert.error);
     inventoryIds.push(newInventoryId);
-    const inventoryUpdate = await inventoryActor.from("inventory").update({ name: "Synthetic CRUD item updated" }).eq("id", newInventoryId).select("id,name").single();
+    assert.equal(inventoryInsert.data.category, `Categoría personalizada ${suffix}`);
+    assert.deepEqual(inventoryInsert.data.attributes, { variant: "sin fragancia" });
+    const inventoryUpdate = await inventoryActor.from("inventory").update({
+      name: "Synthetic CRUD item updated", category: `Otra categoría ${suffix}`,
+      attributes: { variant: "aroma cítrico", size: "250 ml" },
+    }).eq("id", newInventoryId).select("id,name,category,attributes").single();
     assert.ifError(inventoryUpdate.error);
     assert.equal(inventoryUpdate.data.name, "Synthetic CRUD item updated");
+    assert.equal(inventoryUpdate.data.category, `Otra categoría ${suffix}`);
+    assert.deepEqual(inventoryUpdate.data.attributes, { variant: "aroma cítrico", size: "250 ml" });
     const inventoryDelete = await inventoryActor.from("inventory").delete().eq("id", newInventoryId);
     assert.ok(inventoryDelete.error, "inventory employees cannot bypass the stock/catalog delete workflow");
 
@@ -607,6 +617,24 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
     const hiddenBaseRows = await sales.from("inventory").select("id,cost_price").eq("id", seedInventoryId);
     assert.equal(hiddenBaseRows.error, null);
     assert.deepEqual(hiddenBaseRows.data, []);
+
+    const inactiveId = crypto.randomUUID();
+    const inactiveInsert = await service.from("inventory").insert({
+      id: inactiveId, sku: `INACTIVE-${suffix}`, name: "Inactive synthetic item",
+      category: `Custom ${suffix}`, is_active: false,
+    }).select("id").single();
+    assert.ifError(inactiveInsert.error);
+    inventoryIds.push(inactiveId);
+    const unavailableForSale = await sales.from("sales_inventory_lookup").select("id").eq("id", inactiveId);
+    assert.ifError(unavailableForSale.error);
+    assert.deepEqual(unavailableForSale.data, [], "inactive products are hidden from transaction pickers");
+    const purchases = await signedIn(identities.purchases);
+    const inactivePurchase = await purchases.rpc("post_purchase", { p_request: {
+      idempotency_key: crypto.randomUUID(), item_id: inactiveId, quantity: 1,
+      unit_cost: "1.00", payment_type: "contado", restock: false,
+    } });
+    assert.equal(inactivePurchase.error?.code, "23514");
+    assert.match(inactivePurchase.error?.message ?? "", /inventory_item_inactive/);
 
     const inventoryEmployee = await signedIn(identities.inventory);
     const visible = await inventoryEmployee.from("inventory").select("id,cost_price,price,quantity").eq("id", seedInventoryId).single();
