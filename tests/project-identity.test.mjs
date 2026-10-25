@@ -17,7 +17,10 @@ test("the private npm package and lockfile identify Grace Supply", () => {
 test("the small barcode preset uses neutral naming and keeps its physical dimensions", () => {
   const settings = read("../src/lib/settings.ts");
 
-  assert.match(settings, /key: "compacta", label: "Compacta \(25 × 12 mm\)", widthMm: 25, heightMm: 12/);
+  assert.match(
+    settings,
+    /key: "compacta",\s+label: "Compacta \(25 × 12 mm\)",\s+widthMm: 25,\s+heightMm: 12/,
+  );
   assert.doesNotMatch(settings, /key: "joyeria"/);
 });
 

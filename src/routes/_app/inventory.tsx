@@ -9,8 +9,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Pencil, Barcode as BarcodeIcon, Printer, Search, Package, RefreshCw, Power } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Plus,
+  Pencil,
+  Barcode as BarcodeIcon,
+  Printer,
+  Search,
+  Package,
+  RefreshCw,
+  Power,
+} from "lucide-react";
 
 import { BarcodeLabel, LabelSizeControls } from "@/components/BarcodeLabel";
 import { toast } from "sonner";
@@ -22,10 +38,24 @@ export const Route = createFileRoute("/_app/inventory")({
   component: InventoryPage,
 });
 
-type InventoryForm = Omit<Pick<InventoryItem,
-  "sku" | "name" | "description" | "category" | "brand" | "presentation" | "unit" |
-  "attributes" | "isActive" | "costPrice" | "price" | "quantity"
->, "brand" | "presentation" | "unit"> & { brand: string; presentation: string; unit: string };
+type InventoryForm = Omit<
+  Pick<
+    InventoryItem,
+    | "sku"
+    | "name"
+    | "description"
+    | "category"
+    | "brand"
+    | "presentation"
+    | "unit"
+    | "attributes"
+    | "isActive"
+    | "costPrice"
+    | "price"
+    | "quantity"
+  >,
+  "brand" | "presentation" | "unit"
+> & { brand: string; presentation: string; unit: string };
 
 const emptyForm: InventoryForm = {
   sku: "",
@@ -48,14 +78,22 @@ function genSku() {
 
 function InventoryPage() {
   const { isAdmin } = useAuth();
-  const { data: items, loading, loadError, refresh, insert: insertItem, update: updateItem } = useSupabaseTable<InventoryItem>("inventory");
-  const [settings, setSettings] = useSettings();
+  const {
+    data: items,
+    loading,
+    loadError,
+    refresh,
+    insert: insertItem,
+    update: updateItem,
+  } = useSupabaseTable<InventoryItem>("inventory");
+  const [settings, setSettings, settingsReadStatus] = useSettings();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [attributesText, setAttributesText] = useState("{}");
   const [q, setQ] = useState("");
   const [barcodeItem, setBarcodeItem] = useState<InventoryItem | null>(null);
+  const [savingLabelSettings, setSavingLabelSettings] = useState(false);
   const [pending, setPending] = useState(false);
 
   const startNew = () => {
@@ -88,7 +126,8 @@ function InventoryPage() {
     let attributes: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(attributesText || "{}");
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("object_required");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+        throw new Error("object_required");
       attributes = parsed as Record<string, unknown>;
     } catch {
       toast.error("Los atributos adicionales deben ser un objeto JSON válido");
@@ -138,6 +177,20 @@ function InventoryPage() {
 
   const printBarcode = () => window.print();
 
+  const saveLabelSettings = async (patch: Partial<import("@/lib/types").Settings>) => {
+    setSavingLabelSettings(true);
+    try {
+      const confirmed = await setSettings(patch);
+      toast.success("Ajuste de etiqueta guardado");
+      return confirmed;
+    } catch (error) {
+      toast.error(userPersistenceMessage(error));
+      throw error;
+    } finally {
+      setSavingLabelSettings(false);
+    }
+  };
+
   const normalizedQuery = q.trim().toLocaleLowerCase("es-DO");
   const filtered = items.filter((i) => getCatalogSearchText(i).includes(normalizedQuery));
 
@@ -147,20 +200,34 @@ function InventoryPage() {
         title="Inventario de Productos"
         description="Administra productos, categorías, precios y disponibilidad del catálogo."
         actions={
-          <Dialog open={open} onOpenChange={(nextOpen) => { if (!pending) setOpen(nextOpen); }}>
+          <Dialog
+            open={open}
+            onOpenChange={(nextOpen) => {
+              if (!pending) setOpen(nextOpen);
+            }}
+          >
             <DialogTrigger asChild>
-              <Button onClick={startNew} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+              <Button
+                onClick={startNew}
+                className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0"
+              >
                 <Plus className="h-4 w-4 mr-1.5" /> Nuevo producto
               </Button>
             </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>{editing ? "Editar producto" : "Nuevo producto de inventario"}</DialogTitle>
+                <DialogTitle>
+                  {editing ? "Editar producto" : "Nuevo producto de inventario"}
+                </DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-3">
                   <Field label="SKU / Código de barras">
-                    <Input data-testid="catalog-sku" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+                    <Input
+                      data-testid="catalog-sku"
+                      value={form.sku}
+                      onChange={(e) => setForm({ ...form, sku: e.target.value })}
+                    />
                   </Field>
                   <Field label="Nombre del producto" className="col-span-2">
                     <Input
@@ -173,7 +240,12 @@ function InventoryPage() {
 
                 <div className="grid grid-cols-3 gap-3">
                   <Field label="Categoría">
-                    <Input data-testid="catalog-category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Define una categoría" />
+                    <Input
+                      data-testid="catalog-category"
+                      value={form.category}
+                      onChange={(e) => setForm({ ...form, category: e.target.value })}
+                      placeholder="Define una categoría"
+                    />
                   </Field>
                   <Field label="Marca / Fabricante">
                     <Input
@@ -195,20 +267,44 @@ function InventoryPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Unidad de medida">
-                    <Input data-testid="catalog-unit" value={form.unit || ""} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="unidad, ml, g, caja…" />
+                    <Input
+                      data-testid="catalog-unit"
+                      value={form.unit || ""}
+                      onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                      placeholder="unidad, ml, g, caja…"
+                    />
                   </Field>
                   <Field label="Estado del producto">
                     <div className="flex h-10 items-center gap-2">
-                      <Switch id="inventory-active" checked={form.isActive} onCheckedChange={(isActive) => setForm({ ...form, isActive })} />
-                      <Label htmlFor="inventory-active">{form.isActive ? "Activo" : "Inactivo"}</Label>
+                      <Switch
+                        id="inventory-active"
+                        checked={form.isActive}
+                        onCheckedChange={(isActive) => setForm({ ...form, isActive })}
+                      />
+                      <Label htmlFor="inventory-active">
+                        {form.isActive ? "Activo" : "Inactivo"}
+                      </Label>
                     </div>
                   </Field>
                   <Field label="Descripción" className="col-span-2">
-                    <Textarea className="resize-none" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
+                    <Textarea
+                      className="resize-none"
+                      value={form.description}
+                      onChange={(e) => setForm({ ...form, description: e.target.value })}
+                      rows={2}
+                    />
                   </Field>
                   <Field label="Atributos adicionales (JSON)" className="col-span-2">
-                    <Textarea className="resize-none font-mono text-xs" value={attributesText} onChange={(e) => setAttributesText(e.target.value)} rows={3} aria-describedby="catalog-attributes-help" />
-                    <p id="catalog-attributes-help" className="text-xs text-muted-foreground">Usa un objeto JSON para variantes o especificaciones opcionales.</p>
+                    <Textarea
+                      className="resize-none font-mono text-xs"
+                      value={attributesText}
+                      onChange={(e) => setAttributesText(e.target.value)}
+                      rows={3}
+                      aria-describedby="catalog-attributes-help"
+                    />
+                    <p id="catalog-attributes-help" className="text-xs text-muted-foreground">
+                      Usa un objeto JSON para variantes o especificaciones opcionales.
+                    </p>
                   </Field>
                 </div>
 
@@ -245,8 +341,14 @@ function InventoryPage() {
                 </p>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancelar</Button>
-                <Button onClick={save} disabled={pending} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+                <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={save}
+                  disabled={pending}
+                  className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0"
+                >
                   {pending ? "Guardando…" : editing ? "Guardar cambios" : "Agregar producto"}
                 </Button>
               </DialogFooter>
@@ -265,10 +367,18 @@ function InventoryPage() {
         />
       </div>
 
-      {loadError && <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-        <span>No se pudo cargar el catálogo: {loadError}</span>
-        <Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw className="mr-2 h-4 w-4" />Reintentar</Button>
-      </div>}
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm"
+        >
+          <span>No se pudo cargar el catálogo: {loadError}</span>
+          <Button variant="outline" size="sm" onClick={() => void refresh()}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Reintentar
+          </Button>
+        </div>
+      )}
 
       <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
         <table className="w-full text-sm">
@@ -284,15 +394,26 @@ function InventoryPage() {
           </thead>
           <tbody className="divide-y divide-border/60">
             {loading ? (
-              <tr><td colSpan={6} className="py-12 text-center text-muted-foreground" role="status">Cargando catálogo…</td></tr>
+              <tr>
+                <td colSpan={6} className="py-12 text-center text-muted-foreground" role="status">
+                  Cargando catálogo…
+                </td>
+              </tr>
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                  {q ? "No hay productos que coincidan con la búsqueda." : loadError ? "El catálogo no está disponible." : (
+                  {q ? (
+                    "No hay productos que coincidan con la búsqueda."
+                  ) : loadError ? (
+                    "El catálogo no está disponible."
+                  ) : (
                     <div className="flex flex-col items-center gap-3">
                       <Package className="h-8 w-8 opacity-50" />
                       <span>Aún no hay productos. Registra el primero para comenzar.</span>
-                      <Button onClick={startNew}><Plus className="mr-2 h-4 w-4" />Crear primer producto</Button>
+                      <Button onClick={startNew}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Crear primer producto
+                      </Button>
                     </div>
                   )}
                 </td>
@@ -301,25 +422,28 @@ function InventoryPage() {
               filtered.map((i) => {
                 return (
                   <tr key={i.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3.5 font-mono text-xs font-semibold text-muted-foreground">{i.sku}</td>
+                    <td className="px-4 py-3.5 font-mono text-xs font-semibold text-muted-foreground">
+                      {i.sku}
+                    </td>
                     <td className="px-4 py-3.5">
                       <div className="font-medium text-foreground flex items-center gap-2">
                         <Package className="h-3.5 w-3.5 text-muted-foreground" />
                         {i.name}
                       </div>
-                      <div className="text-xs text-[#D4AF37] font-medium mt-0.5">
-                        {i.category}
-                      </div>
+                      <div className="text-xs text-[#D4AF37] font-medium mt-0.5">{i.category}</div>
                     </td>
                     <td className="px-4 py-3.5 text-xs text-muted-foreground">
-                      {[i.brand, i.presentation, i.unit].filter(Boolean).join(" · ") || "Sin detalles adicionales"}
+                      {[i.brand, i.presentation, i.unit].filter(Boolean).join(" · ") ||
+                        "Sin detalles adicionales"}
                       {!i.isActive && <div className="mt-1 text-amber-500">Inactivo</div>}
                     </td>
                     <td className="px-4 py-3.5 text-right font-mono font-semibold text-foreground">
                       {fmtMoney(i.price, settings.currency)}
                     </td>
                     <td className="px-4 py-3.5 text-right">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium ${i.quantity <= 1 ? "bg-destructive/10 text-destructive border border-destructive/20" : "bg-muted text-foreground"}`}>
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium ${i.quantity <= 1 ? "bg-destructive/10 text-destructive border border-destructive/20" : "bg-muted text-foreground"}`}
+                      >
                         {i.quantity}
                       </span>
                     </td>
@@ -379,12 +503,27 @@ function InventoryPage() {
               <div className="overflow-auto">
                 <BarcodeLabel item={barcodeItem} settings={settings} />
               </div>
-              <LabelSizeControls settings={settings} onChange={(patch) => setSettings({ ...settings, ...patch })} />
+              <p className="text-sm text-muted-foreground" role="status">
+                {settingsReadStatus === "failed"
+                  ? "No se pudieron leer los ajustes de etiqueta. La vista previa muestra valores predeterminados; no se puede imprimir hasta volver a cargar los ajustes."
+                  : "La vista previa y la impresión usan los últimos ajustes confirmados. La impresión se pausa mientras se guarda un cambio."}
+              </p>
+              <LabelSizeControls
+                settings={settings}
+                disabled={settingsReadStatus !== "ready" || savingLabelSettings}
+                onChange={saveLabelSettings}
+              />
             </div>
           )}
           <DialogFooter className="no-print">
-            <Button variant="outline" onClick={() => setBarcodeItem(null)}>Cerrar</Button>
-            <Button onClick={printBarcode} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
+            <Button variant="outline" onClick={() => setBarcodeItem(null)}>
+              Cerrar
+            </Button>
+            <Button
+              onClick={printBarcode}
+              disabled={settingsReadStatus !== "ready" || savingLabelSettings}
+              className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0"
+            >
               <Printer className="h-4 w-4 mr-1.5" /> Imprimir
             </Button>
           </DialogFooter>
@@ -394,14 +533,30 @@ function InventoryPage() {
   );
 }
 
-function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+function Field({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   const id = useId();
-  const directControl = isValidElement(children) && (children.type === Input || children.type === Textarea);
+  const directControl =
+    isValidElement(children) && (children.type === Input || children.type === Textarea);
   const control = directControl
     ? cloneElement(children as React.ReactElement<{ id?: string }>, { id })
     : children;
-  return <div className={`space-y-1.5 ${className || ""}`}>
-    <Label htmlFor={directControl ? id : undefined} className="text-xs font-medium text-neutral-300">{label}</Label>
-    {control}
-  </div>;
+  return (
+    <div className={`space-y-1.5 ${className || ""}`}>
+      <Label
+        htmlFor={directControl ? id : undefined}
+        className="text-xs font-medium text-neutral-300"
+      >
+        {label}
+      </Label>
+      {control}
+    </div>
+  );
 }
