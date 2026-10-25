@@ -165,7 +165,7 @@ function PurchasesPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">— Ninguno —</SelectItem>
-                      {inventory.map((i) => <SelectItem key={i.id} value={i.id}>{i.sku} — {i.name}</SelectItem>)}
+                      {inventory.map((i) => <SelectItem key={i.id} value={i.id}>{i.sku} — {i.name} · Stock {i.quantity} · {fmtMoney(i.price, settings.currency)}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>

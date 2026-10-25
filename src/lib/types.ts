@@ -29,24 +29,30 @@ export type Supplier = {
   createdAt: string;
 };
 
-export type ItemKind = "joya" | "piedra";
-
 export type InventoryItem = {
   id: string;
-  sku: string; // used as barcode value
-  kind: ItemKind; // "joya" full piece, "piedra" loose stone/consumable
+  sku: string;
+  /** Legacy discriminator retained only to read old rows during migration. */
+  kind?: string;
   name: string;
-  category: "anillo" | "collar" | "pulsera" | "arete" | "dije" | "reloj" | "piedra" | "otro";
-  metal?: string; // Brand / Manufacturer
-  karat?: string; // Volume / Presentation
-  weightGrams?: number;
-  stone?: string;
-  stoneCarats?: number;
-  stoneCut?: string;
-  stoneClarity?: string;
-  stoneColor?: string;
-  sizeMm?: number;
-  sizeLabel?: string;
+  description: string;
+  category: string;
+  brand: string | null;
+  presentation: string | null;
+  unit: string | null;
+  attributes: Record<string, unknown>;
+  isActive: boolean;
+  /** Legacy jewelry columns remain readable until a separately approved cleanup. */
+  metal?: string | null;
+  karat?: string | null;
+  weightGrams?: number | null;
+  stone?: string | null;
+  stoneCarats?: number | null;
+  stoneCut?: string | null;
+  stoneClarity?: string | null;
+  stoneColor?: string | null;
+  sizeMm?: number | null;
+  sizeLabel?: string | null;
   costPrice: number;
   price: number;
   quantity: number;

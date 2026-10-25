@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Run','RebuildOnly')][string]$Mode = 'Run'
+  [ValidateSet('Run','RebuildOnly','BrowserOnly')][string]$Mode = 'Run'
 )
 $ErrorActionPreference = 'Stop'
 
@@ -115,8 +115,8 @@ try {
 [edge_runtime.secrets]
 ACCOUNT_PROVISIONING_ENABLED = "true"
 ACCOUNT_RECOVERY_ENABLED = "true"
-APP_PUBLIC_ORIGIN = "http://127.0.0.1:3000"
-APP_ALLOWED_ORIGINS = "http://127.0.0.1:3000"
+APP_PUBLIC_ORIGIN = "http://127.0.0.1:5174"
+APP_ALLOWED_ORIGINS = "http://127.0.0.1:5174"
 CHG04_LOCAL_TEST_MODE = "true"
 CHG04_LOCAL_TEST_FAIL_PROFILE_INSERT = "true"
 CHG04_LOCAL_TEST_FAIL_AUTH_CLEANUP = "true"
@@ -141,12 +141,33 @@ CHG04_LOCAL_TEST_FAIL_AUTH_CLEANUP = "true"
 
   Invoke-Supabase @('db','reset','--local','--no-seed','--yes') | Out-Null
   $migrationOutput = Invoke-Supabase @('migration','list','--local')
-  $expected = @('20261021041426','20261021043648','20261022000000','20261022190000','20261022191000','20261022193000','20261022200000','20261022200500','20261022201000','20261022202000','20261022210000','20261022220000','20261022221000','20261022230000','20261022231000')
+  $expected = @('20261021041426','20261021043648','20261022000000','20261022190000','20261022191000','20261022193000','20261022200000','20261022200500','20261022201000','20261022202000','20261022210000','20261022220000','20261022221000','20261022230000','20261022231000','20261024051641')
   if (-not $migrationOutput -or -not ($migrationOutput -join "`n" | Select-String -Pattern 'LOCAL|local|202610')) { throw 'Local migration list returned no recognizable history output.' }
   $contract = Get-Content -LiteralPath (Join-Path $repo 'supabase/tests/chg10_rebuild_contract.sql') -Raw
   Invoke-LocalSql $contract $container | Out-Null
   $fingerprint1 = Get-SchemaFingerprint $container
   Write-Host "First clean rebuild passed migration, schema, RLS, grants, view, constraint and empty-data checks."
+
+  if ($Mode -eq 'BrowserOnly') {
+    $oldEnv = @{}
+    $envMap = @{
+      LOCAL_SUPABASE_URL = $envValues.API_URL
+      LOCAL_SUPABASE_ANON_KEY = $envValues.ANON_KEY
+      LOCAL_SUPABASE_SERVICE_ROLE_KEY = $envValues.SERVICE_ROLE_KEY
+      LOCAL_SUPABASE_JWT_SECRET = $envValues.JWT_SECRET
+      LOCAL_SUPABASE_CONTAINER = $container
+      LOCAL_MAILPIT_URL = $mailpitUrl
+      VITE_SUPABASE_URL = $envValues.API_URL
+      VITE_SUPABASE_ANON_KEY = $envValues.ANON_KEY
+    }
+    foreach ($name in $envMap.Keys) { $oldEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process'); [Environment]::SetEnvironmentVariable($name, $envMap[$name], 'Process') }
+    try {
+      & npm.cmd run test:browser -- --grep 'Auth invitation and initial password setup'
+      if ($LASTEXITCODE -ne 0) { throw 'Local invitation browser suite failed.' }
+    } finally {
+      foreach ($name in $envMap.Keys) { [Environment]::SetEnvironmentVariable($name, $oldEnv[$name], 'Process') }
+    }
+  }
 
   if ($Mode -eq 'Run') {
   $oldEnv = @{}
@@ -193,6 +214,7 @@ CHG04_LOCAL_TEST_FAIL_AUTH_CLEANUP = "true"
   Invoke-Supabase @('stop','--project-id',$chosenProject,'--no-backup') | Out-Null
   $started = $false
   Remove-Item -LiteralPath $workdir -Recurse -Force
+  if ($Mode -eq 'BrowserOnly') { Write-Host 'Local invitation browser suite passed.'; return }
 
   # Independent second reconstruction: a different workdir, Docker project and port block.
   $secondProject = 'chg10run' + ([guid]::NewGuid().ToString('N').Substring(0, 10))

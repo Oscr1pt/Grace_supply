@@ -1,53 +1,42 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { cloneElement, isValidElement, useId, useState } from "react";
 import { useSupabaseTable, uid, fmtMoney } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
-import type { InventoryItem, ItemKind } from "@/lib/types";
+import type { InventoryItem } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Pencil, Trash2, Barcode as BarcodeIcon, Printer, Search, Scissors, Package, Sparkles } from "lucide-react";
+import { Plus, Pencil, Barcode as BarcodeIcon, Printer, Search, Package, RefreshCw, Power } from "lucide-react";
 
 import { BarcodeLabel, LabelSizeControls } from "@/components/BarcodeLabel";
 import { toast } from "sonner";
 import { userPersistenceMessage } from "@/lib/persistence.js";
 import { useAuth } from "@/lib/auth";
+import { getCatalogSearchText } from "@/lib/catalog.js";
 
 export const Route = createFileRoute("/_app/inventory")({
   component: InventoryPage,
 });
 
-const barberCategories: InventoryItem["category"][] = ["anillo", "collar", "pulsera", "arete", "dije", "reloj", "otro"];
+type InventoryForm = Omit<Pick<InventoryItem,
+  "sku" | "name" | "description" | "category" | "brand" | "presentation" | "unit" |
+  "attributes" | "isActive" | "costPrice" | "price" | "quantity"
+>, "brand" | "presentation" | "unit"> & { brand: string; presentation: string; unit: string };
 
-const categoryLabels: Record<InventoryItem["category"], string> = {
-  anillo: "Herramientas & Máquinas",
-  collar: "Cuidado Capilar",
-  pulsera: "Cuidado de Barba",
-  arete: "Estética & Piel",
-  dije: "Ceras & Pomadas",
-  reloj: "Accesorios & Consumibles",
-  piedra: "Insumo / Repuesto",
-  otro: "Otro Producto",
-};
-
-const emptyForm: Omit<InventoryItem, "id" | "createdAt"> = {
+const emptyForm: InventoryForm = {
   sku: "",
-  kind: "joya",
   name: "",
-  category: "anillo",
-  metal: "Marca / Fabricante",
-  karat: "Presentación (ej. 250ml / 8.5oz)",
-  weightGrams: 0,
-  stone: "",
-  stoneCarats: 0,
-  stoneCut: "",
-  stoneClarity: "",
-  stoneColor: "",
-  sizeMm: 0,
-  sizeLabel: "",
+  description: "",
+  category: "",
+  brand: "",
+  presentation: "",
+  unit: "",
+  attributes: {},
+  isActive: true,
   costPrice: 0,
   price: 0,
   quantity: 0,
@@ -59,37 +48,35 @@ function genSku() {
 
 function InventoryPage() {
   const { isAdmin } = useAuth();
-  const { data: items, insert: insertItem, update: updateItem, remove: removeItem } = useSupabaseTable<InventoryItem>("inventory");
+  const { data: items, loading, loadError, refresh, insert: insertItem, update: updateItem } = useSupabaseTable<InventoryItem>("inventory");
   const [settings, setSettings] = useSettings();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [attributesText, setAttributesText] = useState("{}");
   const [q, setQ] = useState("");
   const [barcodeItem, setBarcodeItem] = useState<InventoryItem | null>(null);
   const [pending, setPending] = useState(false);
 
   const startNew = () => {
     setEditing(null);
-    setForm({ ...emptyForm, sku: genSku(), metal: "", karat: "" });
+    setForm({ ...emptyForm, sku: genSku() });
+    setAttributesText("{}");
     setOpen(true);
   };
 
   const startEdit = (i: InventoryItem) => {
     setEditing(i);
-    setForm({ ...emptyForm, ...i, kind: i.kind || "joya" });
+    setForm({
+      ...emptyForm,
+      ...i,
+      brand: i.brand ?? "",
+      presentation: i.presentation ?? "",
+      unit: i.unit ?? "",
+      attributes: i.attributes ?? {},
+    });
+    setAttributesText(JSON.stringify(i.attributes ?? {}, null, 2));
     setOpen(true);
-  };
-
-  const setKind = (kind: ItemKind) => {
-    if (kind === "piedra") {
-      setForm({ ...form, kind, category: "piedra", metal: "", karat: "", sizeMm: 0, sizeLabel: "" });
-    } else {
-      setForm({
-        ...form,
-        kind,
-        category: form.category === "piedra" ? "anillo" : form.category,
-      });
-    }
   };
 
   const save = async () => {
@@ -98,14 +85,38 @@ function InventoryPage() {
       toast.error("Nombre y SKU son obligatorios");
       return;
     }
+    let attributes: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(attributesText || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("object_required");
+      attributes = parsed as Record<string, unknown>;
+    } catch {
+      toast.error("Los atributos adicionales deben ser un objeto JSON válido");
+      return;
+    }
+    if (!form.category.trim()) {
+      toast.error("La categoría es obligatoria");
+      return;
+    }
     setPending(true);
     try {
+      const catalogItem = {
+        ...form,
+        sku: form.sku.trim(),
+        name: form.name.trim(),
+        category: form.category.trim(),
+        description: form.description.trim(),
+        brand: form.brand.trim() || null,
+        presentation: form.presentation.trim() || null,
+        unit: form.unit.trim() || null,
+        attributes,
+      };
       if (editing) {
-        const { quantity: _stock, ...metadataAndPrice } = form;
+        const { quantity: _stock, ...metadataAndPrice } = catalogItem;
         await updateItem(editing.id, metadataAndPrice);
         toast.success("Producto actualizado");
       } else {
-        await insertItem({ id: uid(), createdAt: new Date().toISOString(), ...form });
+        await insertItem({ id: uid(), createdAt: new Date().toISOString(), ...catalogItem });
         toast.success("Producto agregado");
       }
       setOpen(false);
@@ -116,11 +127,10 @@ function InventoryPage() {
     }
   };
 
-  const remove = async (id: string) => {
-    if (!confirm("¿Eliminar este producto del inventario?")) return;
+  const toggleActive = async (item: InventoryItem) => {
     try {
-      await removeItem(id);
-      toast.success("Producto eliminado");
+      await updateItem(item.id, { isActive: !item.isActive } as Partial<InventoryItem>);
+      toast.success(item.isActive ? "Producto desactivado" : "Producto activado");
     } catch (e) {
       toast.error(userPersistenceMessage(e));
     }
@@ -128,120 +138,78 @@ function InventoryPage() {
 
   const printBarcode = () => window.print();
 
-  const filtered = items.filter((i) =>
-    [i.name, i.sku, i.metal, i.stone, categoryLabels[i.category]].filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase()),
-  );
-
-  const isInsumo = form.kind === "piedra";
+  const normalizedQuery = q.trim().toLocaleLowerCase("es-DO");
+  const filtered = items.filter((i) => getCatalogSearchText(i).includes(normalizedQuery));
 
   return (
     <div>
       <PageHeader
         title="Inventario de Productos"
-        description="Catálogo de productos de barbería, estética, cuidado de barba, herramientas y accesorios."
+        description="Administra productos, categorías, precios y disponibilidad del catálogo."
         actions={
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={open} onOpenChange={(nextOpen) => { if (!pending) setOpen(nextOpen); }}>
             <DialogTrigger asChild>
               <Button onClick={startNew} className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0">
                 <Plus className="h-4 w-4 mr-1.5" /> Nuevo producto
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editing ? "Editar producto" : "Nuevo producto de inventario"}</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-2">
-                  <KindCard
-                    active={form.kind === "joya"}
-                    onClick={() => setKind("joya")}
-                    icon={<Package className="h-4 w-4" />}
-                    title="Producto Terminado"
-                    hint="Artículo para venta directa"
-                  />
-                  <KindCard
-                    active={form.kind === "piedra"}
-                    onClick={() => setKind("piedra")}
-                    icon={<Scissors className="h-4 w-4" />}
-                    title="Insumo / Repuesto"
-                    hint="Consumible o accesorio de uso interno"
-                  />
-                </div>
-
                 <div className="grid grid-cols-3 gap-3">
                   <Field label="SKU / Código de barras">
-                    <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+                    <Input data-testid="catalog-sku" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
                   </Field>
                   <Field label="Nombre del producto" className="col-span-2">
                     <Input
                       value={form.name}
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      placeholder={isInsumo ? "Cuchillas de Repuesto Wahl 5-Star" : "Cera Pomada Mate Grace Supply 150ml"}
+                      placeholder="Nombre del producto"
                     />
                   </Field>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
                   <Field label="Categoría">
-                    <Select
-                      value={form.category}
-                      onValueChange={(v) => setForm({ ...form, category: v as InventoryItem["category"] })}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {barberCategories.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {categoryLabels[c]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Input data-testid="catalog-category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Define una categoría" />
                   </Field>
                   <Field label="Marca / Fabricante">
                     <Input
-                      value={form.metal || ""}
-                      onChange={(e) => setForm({ ...form, metal: e.target.value })}
+                      value={form.brand || ""}
+                      data-testid="catalog-brand"
+                      onChange={(e) => setForm({ ...form, brand: e.target.value })}
                       placeholder="Grace Supply, Wahl, BaByliss"
                     />
                   </Field>
                   <Field label="Presentación / Tamaño">
                     <Input
-                      value={form.karat || ""}
-                      onChange={(e) => setForm({ ...form, karat: e.target.value })}
+                      value={form.presentation || ""}
+                      data-testid="catalog-presentation"
+                      onChange={(e) => setForm({ ...form, presentation: e.target.value })}
                       placeholder="250ml, 8.5 oz, N/A"
                     />
                   </Field>
                 </div>
 
-                <div className="rounded-lg border border-border/80 p-3 space-y-3 bg-muted/20">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Detalles adicionales
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <Field label="Especificación / Tipo">
-                      <Input
-                        value={form.stone || ""}
-                        onChange={(e) => setForm({ ...form, stone: e.target.value })}
-                        placeholder="ej. Fijación Fuerte / Aceite de Argán"
-                      />
-                    </Field>
-                    <Field label="Contenido (ml/g/unid)">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={form.stoneCarats || ""}
-                        onChange={(e) => setForm({ ...form, stoneCarats: +e.target.value })}
-                        placeholder="250"
-                      />
-                    </Field>
-                    <Field label="Acabado / Variante">
-                      <Input
-                        value={form.stoneCut || ""}
-                        onChange={(e) => setForm({ ...form, stoneCut: e.target.value })}
-                        placeholder="Efecto Mate / Brillo Medio"
-                      />
-                    </Field>
-                  </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Unidad de medida">
+                    <Input data-testid="catalog-unit" value={form.unit || ""} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="unidad, ml, g, caja…" />
+                  </Field>
+                  <Field label="Estado del producto">
+                    <div className="flex h-10 items-center gap-2">
+                      <Switch id="inventory-active" checked={form.isActive} onCheckedChange={(isActive) => setForm({ ...form, isActive })} />
+                      <Label htmlFor="inventory-active">{form.isActive ? "Activo" : "Inactivo"}</Label>
+                    </div>
+                  </Field>
+                  <Field label="Descripción" className="col-span-2">
+                    <Textarea className="resize-none" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
+                  </Field>
+                  <Field label="Atributos adicionales (JSON)" className="col-span-2">
+                    <Textarea className="resize-none font-mono text-xs" value={attributesText} onChange={(e) => setAttributesText(e.target.value)} rows={3} aria-describedby="catalog-attributes-help" />
+                    <p id="catalog-attributes-help" className="text-xs text-muted-foreground">Usa un objeto JSON para variantes o especificaciones opcionales.</p>
+                  </Field>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
@@ -297,6 +265,11 @@ function InventoryPage() {
         />
       </div>
 
+      {loadError && <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+        <span>No se pudo cargar el catálogo: {loadError}</span>
+        <Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw className="mr-2 h-4 w-4" />Reintentar</Button>
+      </div>}
+
       <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
         <table className="w-full text-sm">
           <thead className="bg-muted/60 text-xs uppercase tracking-wider text-muted-foreground font-semibold">
@@ -310,29 +283,37 @@ function InventoryPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border/60">
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr><td colSpan={6} className="py-12 text-center text-muted-foreground" role="status">Cargando catálogo…</td></tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                  Aún no hay productos registrados en el inventario.
+                  {q ? "No hay productos que coincidan con la búsqueda." : loadError ? "El catálogo no está disponible." : (
+                    <div className="flex flex-col items-center gap-3">
+                      <Package className="h-8 w-8 opacity-50" />
+                      <span>Aún no hay productos. Registra el primero para comenzar.</span>
+                      <Button onClick={startNew}><Plus className="mr-2 h-4 w-4" />Crear primer producto</Button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ) : (
               filtered.map((i) => {
-                const isConsumable = i.kind === "piedra";
                 return (
                   <tr key={i.id} className="hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3.5 font-mono text-xs font-semibold text-muted-foreground">{i.sku}</td>
                     <td className="px-4 py-3.5">
                       <div className="font-medium text-foreground flex items-center gap-2">
-                        {isConsumable ? <Scissors className="h-3.5 w-3.5 text-[#D4AF37]" /> : <Package className="h-3.5 w-3.5 text-muted-foreground" />}
+                        <Package className="h-3.5 w-3.5 text-muted-foreground" />
                         {i.name}
                       </div>
                       <div className="text-xs text-[#D4AF37] font-medium mt-0.5">
-                        {categoryLabels[i.category] || i.category}
+                        {i.category}
                       </div>
                     </td>
                     <td className="px-4 py-3.5 text-xs text-muted-foreground">
-                      {[i.metal, i.karat, i.stone, i.stoneCut].filter(Boolean).join(" · ") || "Estándar"}
+                      {[i.brand, i.presentation, i.unit].filter(Boolean).join(" · ") || "Sin detalles adicionales"}
+                      {!i.isActive && <div className="mt-1 text-amber-500">Inactivo</div>}
                     </td>
                     <td className="px-4 py-3.5 text-right font-mono font-semibold text-foreground">
                       {fmtMoney(i.price, settings.currency)}
@@ -358,16 +339,18 @@ function InventoryPage() {
                           variant="ghost"
                           onClick={() => startEdit(i)}
                           className="hover:text-[#D4AF37]"
+                          aria-label={`Editar ${i.name}`}
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
                           size="icon"
                           variant="ghost"
-                          onClick={() => remove(i.id)}
+                          onClick={() => void toggleActive(i)}
                           className="hover:text-destructive"
+                          aria-label={i.isActive ? `Desactivar ${i.name}` : `Activar ${i.name}`}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Power className="h-4 w-4" />
                         </Button>
                       </div>
                     </td>
@@ -412,25 +395,13 @@ function InventoryPage() {
 }
 
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
-  return <div className={`space-y-1.5 ${className || ""}`}><Label className="text-xs font-medium text-neutral-300">{label}</Label>{children}</div>;
-}
-
-function KindCard({ active, onClick, icon, title, hint }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; hint: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-left rounded-lg border p-3 transition-all ${
-        active
-          ? "border-[#D4AF37] bg-[#D4AF37]/10 text-foreground shadow-sm shadow-[#D4AF37]/10"
-          : "border-border hover:border-[#D4AF37]/50 text-muted-foreground"
-      }`}
-    >
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <span className={active ? "text-[#D4AF37]" : ""}>{icon}</span>
-        {title}
-      </div>
-      <div className="text-xs text-muted-foreground mt-0.5">{hint}</div>
-    </button>
-  );
+  const id = useId();
+  const directControl = isValidElement(children) && (children.type === Input || children.type === Textarea);
+  const control = directControl
+    ? cloneElement(children as React.ReactElement<{ id?: string }>, { id })
+    : children;
+  return <div className={`space-y-1.5 ${className || ""}`}>
+    <Label htmlFor={directControl ? id : undefined} className="text-xs font-medium text-neutral-300">{label}</Label>
+    {control}
+  </div>;
 }

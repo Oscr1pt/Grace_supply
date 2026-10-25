@@ -26,6 +26,12 @@ function toMutationDb(table: DomainTable, value: Record<string, unknown>) {
   return row;
 }
 
+function toUpdateDb(table: DomainTable, value: Record<string, unknown>) {
+  const row = toMutationDb(table, value);
+  delete row.id;
+  return row;
+}
+
 function withoutSaleLines<T extends { id: string }>(item: T) {
   const { lines, ...sale } = item as T & { lines?: SaleLine[] };
   return { sale, lines: lines ?? [] };
@@ -181,7 +187,7 @@ export function useSupabaseTable<T extends { id: string }>(
       await serializeMutation(`${table}:${id}`, async () => {
         const response = await supabase
           .from(table)
-          .update(toMutationDb(table, patch as Record<string, unknown>) as never)
+          .update(toUpdateDb(table, patch as Record<string, unknown>) as never)
           .eq("id", id as UUID)
           .select("*");
         const persisted = await confirmMutation(response, { id });

@@ -4,6 +4,7 @@
  */
 export type UUID = string & { readonly __uuid: unique symbol };
 export type Numeric = number;
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 type ForeignKey<
   Name extends string,
@@ -55,13 +56,14 @@ export type Database = {
         address: string; notes: string; status: "activo" | "inactivo";
       }, "name">;
       inventory: Table<TimestampRow & {
-        sku: string; kind: "joya" | "piedra"; name: string;
-        category: "anillo" | "collar" | "pulsera" | "arete" | "dije" | "reloj" | "piedra" | "otro";
+        sku: string; kind: string; name: string; category: string;
+        description: string; brand: string | null; presentation: string | null; unit: string | null;
+        attributes: Json; is_active: boolean;
         metal: string | null; karat: string | null; weight_grams: Numeric | null;
         stone: string | null; stone_carats: Numeric | null; stone_cut: string | null;
         stone_clarity: string | null; stone_color: string | null; size_mm: Numeric | null;
         size_label: string | null; cost_price: Numeric; price: Numeric; quantity: number;
-      }, "sku" | "kind" | "name" | "category">;
+      }, "sku" | "name" | "category">;
       sales: Table<TimestampRow & {
         receipt_no: string; client_id: UUID; subtotal: Numeric; tax_rate: Numeric;
         tax: Numeric; total: Numeric; payment_type: "contado" | "credito" | null;
@@ -150,7 +152,15 @@ export type Database = {
         Relationships: [];
       };
       admin_inventory_catalog: {
-        Row: { id: UUID; sku: string; name: string; price: Numeric; cost_price: Numeric; quantity: number };
+        Row: {
+          id: UUID; sku: string; kind: string; name: string; category: string;
+          metal: string | null; karat: string | null; weight_grams: Numeric | null;
+          stone: string | null; stone_carats: Numeric | null; stone_cut: string | null;
+          stone_clarity: string | null; stone_color: string | null; size_mm: Numeric | null;
+          size_label: string | null; cost_price: Numeric; price: Numeric; quantity: number; created_at: string;
+          description: string; brand: string | null; presentation: string | null; unit: string | null;
+          attributes: Json; is_active: boolean;
+        };
         Relationships: [];
       };
     };

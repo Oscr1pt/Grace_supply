@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { labelPresets } from "@/lib/settings";
 import { fmtMoney } from "@/lib/storage";
 import type { InventoryItem, Settings } from "@/lib/types";
+import { getBarcodeProductDetails } from "@/lib/catalog.js";
 
 export function LabelSizeControls({
   settings,
@@ -96,10 +97,7 @@ export function LabelSizeControls({
 }
 
 export function BarcodeLabel({ item, settings }: { item: InventoryItem; settings: Settings }) {
-  const specs =
-    item.kind === "piedra"
-      ? `${item.stone || "Piedra"} ${item.stoneCarats || 0}ct`
-      : `${item.karat || ""} ${item.metal || ""}`.trim();
+  const specs = getBarcodeProductDetails(item);
   const compact = settings.labelHeightMm < 18;
 
   return (

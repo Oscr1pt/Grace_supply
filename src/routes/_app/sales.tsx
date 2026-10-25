@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { PersistenceError, userPersistenceMessage } from "@/lib/persistence.js";
 import { getConfirmedBusinessOperation, postBusinessOperation, runFinancialCorrection } from "@/lib/businessOperations";
 import { useAuth } from "@/lib/auth";
+import { clampSaleQuantity } from "@/lib/catalog.js";
 
 export const Route = createFileRoute("/_app/sales")({
   component: SalesPage,
@@ -48,6 +49,7 @@ function SalesPage() {
     if (item.quantity < 1) { toast.error("Sin existencia"); return; }
     const existing = lines.find((l) => l.itemId === item.id);
     if (existing) {
+      if (existing.quantity >= item.quantity) { toast.error("La cantidad supera la existencia disponible"); return; }
       setLines(lines.map((l) => l.itemId === item.id ? { ...l, quantity: l.quantity + 1 } : l));
     } else {
       setLines([...lines, { itemId: item.id, sku: item.sku, name: item.name, unitPrice: item.price, quantity: 1 }]);
@@ -56,7 +58,13 @@ function SalesPage() {
   };
 
   const removeLine = (id: string) => setLines(lines.filter((l) => l.itemId !== id));
-  const setQty = (id: string, q: number) => setLines(lines.map((l) => l.itemId === id ? { ...l, quantity: Math.max(1, q) } : l));
+  const setQty = (id: string, requested: number) => {
+    const product = inventory.find((item) => item.id === id);
+    const available = product?.quantity ?? 0;
+    const quantity = clampSaleQuantity(requested, available);
+    if (requested > available) toast.error("La cantidad no puede superar la existencia disponible");
+    setLines(lines.map((line) => line.itemId === id && quantity > 0 ? { ...line, quantity } : line));
+  };
 
   const reset = () => {
     setClientId("");
@@ -218,7 +226,7 @@ function SalesPage() {
                             <td className="px-3 py-2"><div className="font-medium">{l.name}</div><div className="text-xs text-muted-foreground font-mono">{l.sku}</div></td>
                             <td className="px-3 py-2 text-right font-mono">{fmtMoney(l.unitPrice, settings.currency)}</td>
                             <td className="px-3 py-2 text-right">
-                              <Input type="number" min={1} value={l.quantity} onChange={(e) => setQty(l.itemId, +e.target.value)} className="h-8 w-16 ml-auto text-right" />
+                          <Input type="number" min={1} max={inventory.find((item) => item.id === l.itemId)?.quantity ?? 1} value={l.quantity} onChange={(e) => setQty(l.itemId, +e.target.value)} className="h-8 w-16 ml-auto text-right" aria-label={`Cantidad de ${l.name}`} />
                             </td>
                             <td className="px-3 py-2 text-right font-mono">{fmtMoney(l.unitPrice * l.quantity, settings.currency)}</td>
                             <td className="px-3 py-2"><Button size="icon" variant="ghost" onClick={() => removeLine(l.itemId)}><X className="h-4 w-4" /></Button></td>

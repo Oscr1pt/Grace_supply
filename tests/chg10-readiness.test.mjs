@@ -22,7 +22,7 @@ test("email auth provider remains available for invited-user login while public 
   assert.match(emailBlock, /^enable_signup\s*=\s*true\s*$/m);
 });
 
-test("installable migrations match the reviewed 15-version sequence", () => {
+test("installable migrations match the reviewed 16-version sequence", () => {
   const versions = readdirSync(migrationDir)
     .filter((file) => /^\d{14}_.+\.sql$/.test(file))
     .map((file) => file.slice(0, 14))
@@ -44,6 +44,7 @@ test("installable migrations match the reviewed 15-version sequence", () => {
     "20261022221000",
     "20261022230000",
     "20261022231000",
+    "20261024051641",
   ]);
 });
 
