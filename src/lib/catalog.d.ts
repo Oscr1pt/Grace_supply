@@ -10,4 +10,12 @@ type CatalogSearchFields = {
 
 export function getBarcodeProductDetails(item: CatalogSearchFields): string;
 export function getCatalogSearchText(item: CatalogSearchFields): string;
+export function normalizeCatalogValue(value: unknown): string;
+export function resolveCatalogCategory(value: string, categories: string[]): string;
+export function getCatalogCategories(items: CatalogSearchFields[]): string[];
+export function parseCatalogMoney(raw: string): number | null;
+export function parseCatalogAttributes(raw: string): {
+  value: Record<string, unknown> | null;
+  error: string | null;
+};
 export function clampSaleQuantity(requested: number, available: number): number;

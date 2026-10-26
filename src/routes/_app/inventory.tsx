@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { cloneElement, isValidElement, useId, useState } from "react";
+import { Children, cloneElement, isValidElement, useId, useState } from "react";
 import { useSupabaseTable, uid, fmtMoney } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { InventoryItem } from "@/lib/types";
@@ -32,7 +32,15 @@ import { BarcodeLabel, LabelSizeControls } from "@/components/BarcodeLabel";
 import { toast } from "sonner";
 import { userPersistenceMessage } from "@/lib/persistence.js";
 import { useAuth } from "@/lib/auth";
-import { getCatalogSearchText } from "@/lib/catalog.js";
+import {
+  getCatalogCategories,
+  getCatalogSearchText,
+  normalizeCatalogValue,
+  parseCatalogAttributes,
+  parseCatalogMoney,
+  resolveCatalogCategory,
+} from "@/lib/catalog.js";
+import { persistenceFailure } from "@/lib/persistence.js";
 
 export const Route = createFileRoute("/_app/inventory")({
   component: InventoryPage,
@@ -91,15 +99,25 @@ function InventoryPage() {
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [attributesText, setAttributesText] = useState("{}");
+  const [costPriceText, setCostPriceText] = useState("0");
+  const [priceText, setPriceText] = useState("0");
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<"sku" | "name" | "category" | "costPrice" | "price" | "attributes", string>>
+  >({});
   const [q, setQ] = useState("");
   const [barcodeItem, setBarcodeItem] = useState<InventoryItem | null>(null);
   const [savingLabelSettings, setSavingLabelSettings] = useState(false);
   const [pending, setPending] = useState(false);
+  const [pendingRows, setPendingRows] = useState<Set<string>>(() => new Set());
+  const categories = getCatalogCategories(items);
 
   const startNew = () => {
     setEditing(null);
     setForm({ ...emptyForm, sku: genSku() });
     setAttributesText("{}");
+    setCostPriceText("0");
+    setPriceText("0");
+    setFieldErrors({});
     setOpen(true);
   };
 
@@ -114,11 +132,38 @@ function InventoryPage() {
       attributes: i.attributes ?? {},
     });
     setAttributesText(JSON.stringify(i.attributes ?? {}, null, 2));
+    setCostPriceText(String(i.costPrice));
+    setPriceText(String(i.price));
+    setFieldErrors({});
     setOpen(true);
+  };
+
+  const setMoneyText = (field: "costPrice" | "price", value: string) => {
+    if (field === "costPrice") setCostPriceText(value);
+    else setPriceText(value);
+    setFieldErrors((current) => ({ ...current, [field]: undefined }));
   };
 
   const save = async () => {
     if (pending) return;
+    const nextErrors: typeof fieldErrors = {};
+    if (!form.sku.trim()) nextErrors.sku = "Escribe un SKU para identificar el producto.";
+    if (!form.name.trim()) nextErrors.name = "Escribe el nombre del producto.";
+    if (!form.category.trim()) nextErrors.category = "Elige o escribe una categoría.";
+    const parsedAttributes = parseCatalogAttributes(attributesText);
+    if (parsedAttributes.error) nextErrors.attributes = parsedAttributes.error;
+    const costPrice = isAdmin ? parseCatalogMoney(costPriceText) : form.costPrice;
+    const price = isAdmin ? parseCatalogMoney(priceText) : form.price;
+    if (isAdmin && costPrice === null)
+      nextErrors.costPrice = "Usa un importe igual o mayor que cero, con hasta 2 decimales.";
+    if (isAdmin && price === null)
+      nextErrors.price = "Usa un importe igual o mayor que cero, con hasta 2 decimales.";
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      toast.error("Revisa los campos marcados antes de guardar.");
+      return;
+    }
+    setForm((current) => ({ ...current, costPrice: costPrice as number, price: price as number }));
     if (!form.name.trim() || !form.sku.trim()) {
       toast.error("Nombre y SKU son obligatorios");
       return;
@@ -143,12 +188,14 @@ function InventoryPage() {
         ...form,
         sku: form.sku.trim(),
         name: form.name.trim(),
-        category: form.category.trim(),
+        category: resolveCatalogCategory(form.category, categories),
         description: form.description.trim(),
         brand: form.brand.trim() || null,
         presentation: form.presentation.trim() || null,
         unit: form.unit.trim() || null,
-        attributes,
+        attributes: parsedAttributes.value as Record<string, unknown>,
+        costPrice: costPrice as number,
+        price: price as number,
       };
       if (editing) {
         const { quantity: _stock, ...metadataAndPrice } = catalogItem;
@@ -159,19 +206,33 @@ function InventoryPage() {
         toast.success("Producto agregado");
       }
       setOpen(false);
+      setFieldErrors({});
     } catch (e) {
-      toast.error(userPersistenceMessage(e));
+      if (persistenceFailure(e).kind === "conflict") {
+        setFieldErrors((current) => ({ ...current, sku: "Este SKU ya existe. Usa otro código." }));
+        toast.error("El SKU ya está registrado. Usa otro código.");
+      } else {
+        toast.error(userPersistenceMessage(e));
+      }
     } finally {
       setPending(false);
     }
   };
 
   const toggleActive = async (item: InventoryItem) => {
+    if (pendingRows.has(item.id)) return;
+    setPendingRows((current) => new Set(current).add(item.id));
     try {
       await updateItem(item.id, { isActive: !item.isActive } as Partial<InventoryItem>);
       toast.success(item.isActive ? "Producto desactivado" : "Producto activado");
     } catch (e) {
       toast.error(userPersistenceMessage(e));
+    } finally {
+      setPendingRows((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
     }
   };
 
@@ -191,7 +252,7 @@ function InventoryPage() {
     }
   };
 
-  const normalizedQuery = q.trim().toLocaleLowerCase("es-DO");
+  const normalizedQuery = normalizeCatalogValue(q);
   const filtered = items.filter((i) => getCatalogSearchText(i).includes(normalizedQuery));
 
   return (
@@ -221,31 +282,76 @@ function InventoryPage() {
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <Field label="SKU / Código de barras">
                     <Input
                       data-testid="catalog-sku"
                       value={form.sku}
-                      onChange={(e) => setForm({ ...form, sku: e.target.value })}
+                      aria-invalid={Boolean(fieldErrors.sku)}
+                      aria-describedby={
+                        fieldErrors.sku ? "catalog-sku-error catalog-sku-help" : "catalog-sku-help"
+                      }
+                      onChange={(e) => {
+                        setForm({ ...form, sku: e.target.value });
+                        setFieldErrors((current) => ({ ...current, sku: undefined }));
+                      }}
                     />
+                    <p id="catalog-sku-help" className="text-xs text-muted-foreground">
+                      El código sugerido se confirma como único al guardar.
+                    </p>
+                    {fieldErrors.sku && (
+                      <p id="catalog-sku-error" className="text-sm text-destructive" role="alert">
+                        {fieldErrors.sku}
+                      </p>
+                    )}
                   </Field>
-                  <Field label="Nombre del producto" className="col-span-2">
+                  <Field label="Nombre del producto" className="lg:col-span-2">
                     <Input
                       value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      aria-invalid={Boolean(fieldErrors.name)}
+                      aria-describedby={fieldErrors.name ? "catalog-name-error" : undefined}
+                      onChange={(e) => {
+                        setForm({ ...form, name: e.target.value });
+                        setFieldErrors((current) => ({ ...current, name: undefined }));
+                      }}
                       placeholder="Nombre del producto"
                     />
+                    {fieldErrors.name && (
+                      <p id="catalog-name-error" className="text-sm text-destructive" role="alert">
+                        {fieldErrors.name}
+                      </p>
+                    )}
                   </Field>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <Field label="Categoría">
                     <Input
                       data-testid="catalog-category"
                       value={form.category}
-                      onChange={(e) => setForm({ ...form, category: e.target.value })}
+                      list="inventory-categories"
+                      aria-invalid={Boolean(fieldErrors.category)}
+                      aria-describedby={fieldErrors.category ? "catalog-category-error" : undefined}
+                      onChange={(e) => {
+                        setForm({ ...form, category: e.target.value });
+                        setFieldErrors((current) => ({ ...current, category: undefined }));
+                      }}
                       placeholder="Define una categoría"
                     />
+                    <datalist id="inventory-categories">
+                      {categories.map((category) => (
+                        <option key={category} value={category} />
+                      ))}
+                    </datalist>
+                    {fieldErrors.category && (
+                      <p
+                        id="catalog-category-error"
+                        className="text-sm text-destructive"
+                        role="alert"
+                      >
+                        {fieldErrors.category}
+                      </p>
+                    )}
                   </Field>
                   <Field label="Marca / Fabricante">
                     <Input
@@ -265,7 +371,7 @@ function InventoryPage() {
                   </Field>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label="Unidad de medida">
                     <Input
                       data-testid="catalog-unit"
@@ -286,7 +392,7 @@ function InventoryPage() {
                       </Label>
                     </div>
                   </Field>
-                  <Field label="Descripción" className="col-span-2">
+                  <Field label="Descripción" className="sm:col-span-2">
                     <Textarea
                       className="resize-none"
                       value={form.description}
@@ -294,38 +400,76 @@ function InventoryPage() {
                       rows={2}
                     />
                   </Field>
-                  <Field label="Atributos adicionales (JSON)" className="col-span-2">
-                    <Textarea
-                      className="resize-none font-mono text-xs"
-                      value={attributesText}
-                      onChange={(e) => setAttributesText(e.target.value)}
-                      rows={3}
-                      aria-describedby="catalog-attributes-help"
-                    />
-                    <p id="catalog-attributes-help" className="text-xs text-muted-foreground">
-                      Usa un objeto JSON para variantes o especificaciones opcionales.
-                    </p>
-                  </Field>
+                  <details className="col-span-full rounded-md border border-border px-3 py-2">
+                    <summary className="cursor-pointer text-sm font-medium">
+                      Atributos adicionales (opcional)
+                    </summary>
+                    <div className="mt-3 space-y-2">
+                      <p id="catalog-attributes-help" className="text-xs text-muted-foreground">
+                        Agrega especificaciones opcionales en formato JSON. Déjalo vacío si no
+                        necesitas atributos adicionales.
+                      </p>
+                      <Textarea
+                        data-testid="catalog-attributes"
+                        className="resize-y font-mono text-xs"
+                        value={attributesText}
+                        onChange={(e) => {
+                          setAttributesText(e.target.value);
+                          setFieldErrors((current) => ({ ...current, attributes: undefined }));
+                        }}
+                        rows={4}
+                        aria-invalid={Boolean(fieldErrors.attributes)}
+                        aria-describedby={
+                          fieldErrors.attributes
+                            ? "catalog-attributes-help catalog-attributes-error"
+                            : "catalog-attributes-help"
+                        }
+                      />
+                      {fieldErrors.attributes && (
+                        <p
+                          id="catalog-attributes-error"
+                          className="text-sm text-destructive"
+                          role="alert"
+                        >
+                          {fieldErrors.attributes}
+                        </p>
+                      )}
+                    </div>
+                  </details>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Field label="Costo de compra">
                     <Input
-                      type="number"
-                      step="0.01"
-                      value={form.costPrice}
+                      type="text"
+                      inputMode="decimal"
+                      value={costPriceText}
                       disabled={!isAdmin || pending}
-                      onChange={(e) => setForm({ ...form, costPrice: +e.target.value })}
+                      aria-invalid={Boolean(fieldErrors.costPrice)}
+                      aria-describedby={fieldErrors.costPrice ? "catalog-cost-error" : undefined}
+                      onChange={(e) => setMoneyText("costPrice", e.target.value)}
                     />
+                    {fieldErrors.costPrice && (
+                      <p id="catalog-cost-error" className="text-sm text-destructive" role="alert">
+                        {fieldErrors.costPrice}
+                      </p>
+                    )}
                   </Field>
                   <Field label="Precio de venta">
                     <Input
-                      type="number"
-                      step="0.01"
-                      value={form.price}
+                      type="text"
+                      inputMode="decimal"
+                      value={priceText}
                       disabled={!isAdmin || pending}
-                      onChange={(e) => setForm({ ...form, price: +e.target.value })}
+                      aria-invalid={Boolean(fieldErrors.price)}
+                      aria-describedby={fieldErrors.price ? "catalog-price-error" : undefined}
+                      onChange={(e) => setMoneyText("price", e.target.value)}
                     />
+                    {fieldErrors.price && (
+                      <p id="catalog-price-error" className="text-sm text-destructive" role="alert">
+                        {fieldErrors.price}
+                      </p>
+                    )}
                   </Field>
                   <Field label="Existencia (Stock)">
                     <Input
@@ -360,7 +504,8 @@ function InventoryPage() {
       <div className="relative mb-4 max-w-sm">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Buscar por nombre, SKU, marca, categoría…"
+          placeholder="Buscar por SKU, nombre, categoría, marca o presentación…"
+          aria-label="Buscar en el catálogo"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           className="pl-9"
@@ -380,8 +525,14 @@ function InventoryPage() {
         </div>
       )}
 
-      <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
-        <table className="w-full text-sm">
+      {!loading && !loadError && items.length > 0 && (
+        <p className="mb-2 text-xs text-muted-foreground" role="status" aria-live="polite">
+          {filtered.length} {filtered.length === 1 ? "producto" : "productos"}
+          {q.trim() ? " encontrados" : " en el catálogo"}
+        </p>
+      )}
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
+        <table className="w-full min-w-[760px] text-sm" aria-label="Productos del inventario">
           <thead className="bg-muted/60 text-xs uppercase tracking-wider text-muted-foreground font-semibold">
             <tr>
               <th className="text-left px-4 py-3.5">SKU</th>
@@ -422,20 +573,29 @@ function InventoryPage() {
               filtered.map((i) => {
                 return (
                   <tr key={i.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3.5 font-mono text-xs font-semibold text-muted-foreground">
+                    <td
+                      className="max-w-40 break-all px-4 py-3.5 font-mono text-xs font-semibold text-muted-foreground"
+                      title={i.sku}
+                    >
                       {i.sku}
                     </td>
                     <td className="px-4 py-3.5">
-                      <div className="font-medium text-foreground flex items-center gap-2">
+                      <div
+                        className={`flex items-center gap-2 break-words font-medium ${i.isActive ? "text-foreground" : "text-muted-foreground"}`}
+                      >
                         <Package className="h-3.5 w-3.5 text-muted-foreground" />
-                        {i.name}
+                        <span title={i.name}>{i.name}</span>
+                        <span
+                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${i.isActive ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground"}`}
+                        >
+                          {i.isActive ? "Activo" : "Inactivo"}
+                        </span>
                       </div>
                       <div className="text-xs text-[#D4AF37] font-medium mt-0.5">{i.category}</div>
                     </td>
-                    <td className="px-4 py-3.5 text-xs text-muted-foreground">
+                    <td className="max-w-xs break-words px-4 py-3.5 text-xs text-muted-foreground">
                       {[i.brand, i.presentation, i.unit].filter(Boolean).join(" · ") ||
                         "Sin detalles adicionales"}
-                      {!i.isActive && <div className="mt-1 text-amber-500">Inactivo</div>}
                     </td>
                     <td className="px-4 py-3.5 text-right font-mono font-semibold text-foreground">
                       {fmtMoney(i.price, settings.currency)}
@@ -454,6 +614,8 @@ function InventoryPage() {
                           variant="ghost"
                           onClick={() => setBarcodeItem(i)}
                           title="Código de barras"
+                          aria-label={`Código de barras para ${i.name}`}
+                          disabled={pendingRows.has(i.id)}
                           className="hover:text-[#D4AF37]"
                         >
                           <BarcodeIcon className="h-4 w-4" />
@@ -462,6 +624,7 @@ function InventoryPage() {
                           size="icon"
                           variant="ghost"
                           onClick={() => startEdit(i)}
+                          disabled={pendingRows.has(i.id)}
                           className="hover:text-[#D4AF37]"
                           aria-label={`Editar ${i.name}`}
                         >
@@ -471,6 +634,8 @@ function InventoryPage() {
                           size="icon"
                           variant="ghost"
                           onClick={() => void toggleActive(i)}
+                          disabled={pendingRows.has(i.id)}
+                          aria-busy={pendingRows.has(i.id)}
                           className="hover:text-destructive"
                           aria-label={i.isActive ? `Desactivar ${i.name}` : `Activar ${i.name}`}
                         >
@@ -543,15 +708,18 @@ function Field({
   className?: string;
 }) {
   const id = useId();
-  const directControl =
-    isValidElement(children) && (children.type === Input || children.type === Textarea);
-  const control = directControl
-    ? cloneElement(children as React.ReactElement<{ id?: string }>, { id })
-    : children;
+  const hasDirectControl = Children.toArray(children).some(
+    (child) => isValidElement(child) && (child.type === Input || child.type === Textarea),
+  );
+  const control = Children.map(children, (child) =>
+    isValidElement(child) && (child.type === Input || child.type === Textarea)
+      ? cloneElement(child as React.ReactElement<{ id?: string }>, { id })
+      : child,
+  );
   return (
     <div className={`space-y-1.5 ${className || ""}`}>
       <Label
-        htmlFor={directControl ? id : undefined}
+        htmlFor={hasDirectControl ? id : undefined}
         className="text-xs font-medium text-neutral-300"
       >
         {label}
