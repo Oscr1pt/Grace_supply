@@ -304,6 +304,45 @@ test.describe.serial("CHG-15 dashboard operational clarity", () => {
     page,
   }) => {
     await login(page);
+    const today = businessToday();
+    const annulledOnlyExpenses = [
+      {
+        id: "00000000-0000-0000-0000-000000000015",
+        concept: "Synthetic annulled dashboard record",
+        category: "otros",
+        description: "Synthetic annulled dashboard record",
+        amount: 30,
+        date: today,
+        payment_method: "efectivo",
+        beneficiary: "Synthetic fixture",
+        registered_by: "Synthetic fixture",
+        status: "anulado",
+        created_at: `${today}T15:00:00.000Z`,
+        voided_at: `${today}T17:00:00.000Z`,
+        void_reason: "Synthetic dashboard fixture",
+      },
+    ];
+    let isolatedExpenseReads = 0;
+    const expensesEndpoint = "**/rest/v1/expenses*";
+    const dashboardBaselineRoutes = [
+      ["**/rest/v1/sales*", []],
+      [expensesEndpoint, annulledOnlyExpenses],
+      ["**/rest/v1/clients*", []],
+    ];
+    for (const [endpoint, rows] of dashboardBaselineRoutes) {
+      await page.route(endpoint, async (route) => {
+        if (route.request().method() !== "GET") {
+          await route.continue();
+          return;
+        }
+        if (endpoint === expensesEndpoint) isolatedExpenseReads += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(rows),
+        });
+      });
+    }
     await page.goto("/dashboard");
 
     const booked = page.getByRole("group", { name: "Ventas contabilizadas · mes" });
@@ -312,6 +351,8 @@ test.describe.serial("CHG-15 dashboard operational clarity", () => {
     await expect(page.getByRole("group", { name: "Gastos registrados · mes" })).toContainText(
       "No hay gastos registrados este mes.",
     );
+    expect(isolatedExpenseReads).toBeGreaterThan(0);
+    for (const [endpoint] of dashboardBaselineRoutes) await page.unroute(endpoint);
     const inventory = page.getByRole("group", { name: "Inventario a precio de venta" });
     await expect(inventory).toContainText("RD$");
     const inventoryBeforeText = await inventory.innerText();

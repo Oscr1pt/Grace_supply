@@ -95,6 +95,7 @@ function Dashboard() {
           value={fmtMoney(metrics.monthExpenseAmount)}
           hint={`${metrics.monthExpenseCount} gastos · anulados excluidos`}
           emptyHint="No hay gastos registrados este mes."
+          isMetricEmpty={metrics.monthExpenseCount === 0}
           retryLabel="gastos"
         />
         <MetricCard
@@ -228,6 +229,7 @@ function MetricCard({
   value,
   hint,
   emptyHint,
+  isMetricEmpty,
   retryLabel,
 }: {
   label: string;
@@ -237,6 +239,7 @@ function MetricCard({
   value: string;
   hint: string;
   emptyHint: string;
+  isMetricEmpty?: boolean;
   retryLabel: string;
 }) {
   const state = getDashboardReadState(query, allowed);
@@ -280,7 +283,7 @@ function MetricCard({
   const stateHint =
     state === "stale"
       ? "Dato anterior; no se pudo actualizar."
-      : state === "empty"
+      : state === "empty" || isMetricEmpty
         ? emptyHint
         : hint;
   return (
