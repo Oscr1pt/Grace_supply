@@ -1503,23 +1503,61 @@ const integration = test.describe("local atomic financial operations", { skip: !
   test("expense posting is audited, direct mutation is denied, and authorized annulment preserves it", async () => {
     const actor = await signedIn(admin);
     const key = crypto.randomUUID();
-    const posted = await actor.rpc("post_expense", { p_request: {
-      idempotency_key: key, concept: "Synthetic audit expense", category: "otros", amount: "8.50",
-      payment_method: "efectivo", beneficiary: "Synthetic fixture", date: "2026-10-22",
-    } });
+    const expenseRequest = {
+      idempotency_key: key,
+      concept: "Synthetic audit expense",
+      category: "otros",
+      amount: "8.50",
+      payment_method: "efectivo",
+      beneficiary: "Synthetic fixture",
+      date: "2026-10-22",
+    };
+    const posted = await actor.rpc("post_expense", { p_request: expenseRequest });
     assert.ifError(posted.error);
-    const audit = await service.from("financial_audit_events").select("actor_id,event_type,entity_id")
-      .eq("operation_id", posted.data.operation_id).single();
-    assert.ifError(audit.error); assert.equal(audit.data.actor_id, admin.id); assert.equal(audit.data.event_type, "expense");
+    const retry = await actor.rpc("post_expense", { p_request: expenseRequest });
+    assert.ifError(retry.error);
+    assert.deepEqual(retry.data, posted.data);
+    const persistedRows = await service
+      .from("expenses")
+      .select("id")
+      .eq("id", posted.data.expense_id);
+    assert.ifError(persistedRows.error);
+    assert.equal(persistedRows.data.length, 1);
+    const audit = await service
+      .from("financial_audit_events")
+      .select("actor_id,event_type,entity_id")
+      .eq("operation_id", posted.data.operation_id)
+      .single();
+    assert.ifError(audit.error);
+    assert.equal(audit.data.actor_id, admin.id);
+    assert.equal(audit.data.event_type, "expense");
     assert.equal(audit.data.entity_id, posted.data.expense_id);
-    const directUpdate = await actor.from("expenses").update({ amount: 1 }).eq("id", posted.data.expense_id);
+    const directUpdate = await actor
+      .from("expenses")
+      .update({ amount: 1 })
+      .eq("id", posted.data.expense_id);
     assert.ok(directUpdate.error);
-    const annulled = await actor.rpc("annul_financial_document", { p_request: {
-      idempotency_key: crypto.randomUUID(), document_type: "expense", document_id: posted.data.expense_id, reason: "Synthetic local expense correction",
-    } });
+    const annulled = await actor.rpc("annul_financial_document", {
+      p_request: {
+        idempotency_key: crypto.randomUUID(),
+        document_type: "expense",
+        document_id: posted.data.expense_id,
+        reason: "Synthetic local expense correction",
+      },
+    });
     assert.ifError(annulled.error);
-    const original = await service.from("expenses").select("amount,status,void_reason,voided_by").eq("id", posted.data.expense_id).single();
-    assert.ifError(original.error); assert.deepEqual(original.data, { amount: 8.5, status: "anulado", void_reason: "Synthetic local expense correction", voided_by: admin.id });
+    const original = await service
+      .from("expenses")
+      .select("amount,status,void_reason,voided_by")
+      .eq("id", posted.data.expense_id)
+      .single();
+    assert.ifError(original.error);
+    assert.deepEqual(original.data, {
+      amount: 8.5,
+      status: "anulado",
+      void_reason: "Synthetic local expense correction",
+      voided_by: admin.id,
+    });
   });
 
   test("audit insertion failure rolls back the financial operation and its stock change", async () => {

@@ -1,5 +1,5 @@
 const STORAGE_PREFIX = "grace.pending-business-operation.v1:";
-const OPERATION_TYPES = new Set(["sale", "purchase", "financial_annulment"]);
+const OPERATION_TYPES = new Set(["sale", "purchase", "expense", "financial_annulment"]);
 
 function storageKey(actorId) {
   if (typeof actorId !== "string" || !actorId.trim()) {

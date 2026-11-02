@@ -53,3 +53,27 @@ test("only the matching confirmed operation can clear the retained intent", () =
   assert.equal(clearPendingBusinessOperation(storage, "actor-a", "same-key"), true);
   assert.equal(readPendingBusinessOperation(storage, "actor-a"), null);
 });
+
+test("an expense intent survives reload and cannot reuse its key for another payload", () => {
+  const storage = memoryStorage();
+  const intent = {
+    type: "expense",
+    idempotencyKey: "expense-stable-key",
+    request: { concept: "Synthetic utility", amount: "12.00", date: "2026-11-01" },
+  };
+
+  persistPendingBusinessOperation(storage, "actor-expense", intent);
+  assert.deepEqual(readPendingBusinessOperation(storage, "actor-expense"), {
+    ...intent,
+    actorId: "actor-expense",
+  });
+  assert.throws(
+    () =>
+      persistPendingBusinessOperation(storage, "actor-expense", {
+        ...intent,
+        request: { ...intent.request, amount: "99.00" },
+      }),
+    /clave de idempotencia/i,
+  );
+  assert.equal(readPendingBusinessOperation(storage, "another-actor"), null);
+});
