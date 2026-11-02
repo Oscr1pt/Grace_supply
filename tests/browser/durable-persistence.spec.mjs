@@ -278,9 +278,20 @@ test.describe("durable persistence in the browser", () => {
     await page.goto("/sales");
     const row = page.locator("tr").filter({ hasText: sale.data.receipt_no });
     await expect(row).toBeVisible();
-    page.once("dialog", (browserDialog) => browserDialog.accept("Corrección sintética de recibo"));
     await row.getByRole("button", { name: "Anular venta" }).click();
-    await expect(page.getByText("Venta anulada con compensación persistida")).toBeVisible();
+    const annulDialog = page.getByRole("dialog");
+    await expect(annulDialog).toContainText(sale.data.receipt_no);
+    await annulDialog.getByRole("button", { name: "Cancelar" }).click();
+    await expect(annulDialog).toHaveCount(0);
+    await expect(row.getByText("Anulada")).toHaveCount(0);
+
+    await row.getByRole("button", { name: "Anular venta" }).click();
+    const confirmedAnnulDialog = page.getByRole("dialog");
+    await confirmedAnnulDialog
+      .getByLabel("Motivo obligatorio")
+      .fill("Corrección sintética de recibo");
+    await confirmedAnnulDialog.getByRole("button", { name: "Confirmar anulación" }).click();
+    await expect(page.getByText("Venta anulada con compensación persistida.")).toBeVisible();
     await expect(row.getByText("Anulada")).toBeVisible();
     const original = await service
       .from("sales")

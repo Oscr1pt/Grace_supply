@@ -22,7 +22,7 @@ test("email auth provider remains available for invited-user login while public 
   assert.match(emailBlock, /^enable_signup\s*=\s*true\s*$/m);
 });
 
-test("installable migrations match the reviewed 16-version sequence", () => {
+test("installable migrations match the reviewed base and CHG-18 sequence", () => {
   const versions = readdirSync(migrationDir)
     .filter((file) => /^\d{14}_.+\.sql$/.test(file))
     .map((file) => file.slice(0, 14))
@@ -45,12 +45,15 @@ test("installable migrations match the reviewed 16-version sequence", () => {
     "20261022230000",
     "20261022231000",
     "20261024051641",
+    "20261031120000",
   ]);
 });
 
 test("legacy containment migration stays outside the installable sequence", () => {
   assert.equal(
-    existsSync(resolve(root, "supabase/legacy-migrations/20261020120000_chg00_anonymous_containment.sql")),
+    existsSync(
+      resolve(root, "supabase/legacy-migrations/20261020120000_chg00_anonymous_containment.sql"),
+    ),
     true,
   );
   assert.equal(
@@ -68,8 +71,14 @@ test("database integration suites require an explicit local container target", (
 });
 
 test("first-admin SQL is operator-only, single-use, inactive by default, and confirmation-gated", () => {
-  const createSql = readFileSync(resolve(root, "supabase/bootstrap/first-admin-create.sql"), "utf8");
-  const activateSql = readFileSync(resolve(root, "supabase/bootstrap/first-admin-activate.sql"), "utf8");
+  const createSql = readFileSync(
+    resolve(root, "supabase/bootstrap/first-admin-create.sql"),
+    "utf8",
+  );
+  const activateSql = readFileSync(
+    resolve(root, "supabase/bootstrap/first-admin-activate.sql"),
+    "utf8",
+  );
 
   assert.match(createSql, /pg_advisory_xact_lock/);
   assert.match(createSql, /FROM public\.user_profiles/);

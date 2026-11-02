@@ -18,6 +18,7 @@ let identityId;
 let employeeIdentityId;
 let productSku;
 let productId;
+let originalSettings;
 const disposableRun = process.env.CHG13_DISPOSABLE_TESTS === "1";
 
 test.describe.serial("CHG-13 catalog experience", () => {
@@ -27,6 +28,21 @@ test.describe.serial("CHG-13 catalog experience", () => {
     service = createClient(url, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    if (disposableRun) {
+      const settings = await service.from("settings").select("*").single();
+      if (settings.error) throw settings.error;
+      originalSettings = settings.data;
+      const testOnlySalesPolicy = await service
+        .from("settings")
+        .update({
+          tax_rate: 0,
+          tax_policy_approved: true,
+          tax_prices_include: false,
+          tax_rounding_policy: "synthetic-browser-test-only",
+        })
+        .eq("id", originalSettings.id);
+      if (testOnlySalesPolicy.error) throw testOnlySalesPolicy.error;
+    }
     const created = await service.auth.admin.createUser({ email, password, email_confirm: true });
     if (created.error) throw created.error;
     identityId = created.data.user.id;
@@ -59,10 +75,21 @@ test.describe.serial("CHG-13 catalog experience", () => {
   });
 
   test.afterAll(async () => {
-    if (!service || !identityId) return;
+    if (!service) return;
     if (!disposableRun) {
       if (employeeIdentityId) await service.auth.admin.deleteUser(employeeIdentityId);
-      await service.auth.admin.deleteUser(identityId);
+      if (identityId) await service.auth.admin.deleteUser(identityId);
+    }
+    if (originalSettings) {
+      await service
+        .from("settings")
+        .update({
+          tax_rate: originalSettings.tax_rate,
+          tax_policy_approved: originalSettings.tax_policy_approved,
+          tax_prices_include: originalSettings.tax_prices_include,
+          tax_rounding_policy: originalSettings.tax_rounding_policy,
+        })
+        .eq("id", originalSettings.id);
     }
   });
 
@@ -357,7 +384,7 @@ test.describe.serial("CHG-13 catalog experience", () => {
       await quantity.fill("2");
       await expect(quantity).toHaveValue("1");
       await expect(
-        page.getByText("La cantidad no puede superar la existencia disponible"),
+        page.getByText("La cantidad no puede superar 1 unidad disponible."),
       ).toBeVisible();
 
       await page.goto("/purchases");
