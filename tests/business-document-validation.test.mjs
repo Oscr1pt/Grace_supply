@@ -73,3 +73,27 @@ test("a cash purchase permits a free-text supplier and a non-restocking descript
     {},
   );
 });
+
+test("a quick cash purchase permits no supplier while credit still requires a registered supplier", () => {
+  const draft = {
+    supplierId: "",
+    supplierName: "",
+    suppliers: [supplier],
+    paymentType: "contado",
+    invoiceNo: "",
+    dueDate: "",
+    description: "Compra rápida de inventario",
+    itemId: product.id,
+    inventory: [product],
+    quantity: 2,
+    unitCost: 12.5,
+    restock: true,
+    quickPurchase: true,
+  };
+
+  assert.deepEqual(validatePurchaseDraft(draft), {});
+  assert.match(
+    validatePurchaseDraft({ ...draft, paymentType: "credito" }).supplierId,
+    /proveedor registrado y activo/i,
+  );
+});

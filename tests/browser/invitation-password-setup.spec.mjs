@@ -148,7 +148,8 @@ test.describe("Auth invitation and initial password setup", () => {
     assertNoError(login.error);
     expect(login.data.user.id).toBe(identity.id);
 
-    await page.goto("/login");
+    await page.getByRole("link", { name: "Volver al inicio de sesión" }).click();
+    await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("button", { name: /entrar al sistema/i })).toBeEnabled();
     await page.locator("#username").fill(`invite_first_${suffix}`);
     await page.locator("#password").fill(newPassword);
@@ -245,9 +246,69 @@ test.describe("Auth invitation and initial password setup", () => {
     expect(updatedPassword).toBe(newPassword);
   });
 
-  test("expired or invalid callback errors do not reuse an unrelated stored session", async ({ page }) => {
-    await page.goto("/reset-password?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired");
+  test("returning from a verified invite cancels only that temporary session and permits normal login", async ({
+    page,
+  }) => {
+    const { email } = await createBootstrapIdentity("cancel");
+    const inviteLink = await mailLink(email, "invite");
+    await page.goto(inviteLink);
+    await expect(page.getByLabel("Contraseña nueva")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Volver al inicio de sesión" })).toBeVisible();
+
+    await page.getByRole("link", { name: "Volver al inicio de sesión" }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("button", { name: /entrar al sistema/i })).toBeEnabled();
+    const hasSessionAfterCancel = await page.evaluate(
+      (sessionKey) => Object.keys(sessionStorage).includes(sessionKey),
+      authStorageKey,
+    );
+    expect(hasSessionAfterCancel).toBe(false);
+
+    const activePassword = `Active-${crypto.randomUUID()}-Aa1!`;
+    const activeAccount = await service.auth.admin.createUser({
+      email: `active-after-cancel-${suffix}@example.test`,
+      password: activePassword,
+      email_confirm: true,
+    });
+    assertNoError(activeAccount.error);
+    accounts.push(activeAccount.data.user);
+    const username = `active_cancel_${suffix}`;
+    const profile = await service.from("user_profiles").insert({
+      auth_user_id: activeAccount.data.user.id,
+      username,
+      name: "Synthetic active account",
+      role: "employee",
+      permissions: ["sales"],
+      active: true,
+    });
+    assertNoError(profile.error);
+
+    await page.getByLabel("Usuario").fill(username);
+    await page.getByLabel("Contraseña").fill(activePassword);
+    await page.getByRole("button", { name: /entrar al sistema/i }).click();
+    try {
+      await expect(page).toHaveURL(/\/dashboard(?:$|\?)/, { timeout: 8000 });
+    } catch (error) {
+      const alerts = await page.getByRole("alert").allTextContents();
+      const statuses = await page.getByRole("status").allTextContents();
+      throw new Error(
+        `Normal login after cancellation did not reach dashboard; alerts=${alerts.join("|")}; statuses=${statuses.join("|")}`,
+        { cause: error },
+      );
+    }
+    await expect(page.getByRole("button", { name: /cerrar sesi[oó]n/i })).toBeVisible();
+  });
+
+  test("expired or invalid callback errors do not reuse an unrelated stored session", async ({
+    page,
+  }) => {
+    await page.goto(
+      "/reset-password?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired",
+    );
     await expect(page.getByRole("alert")).toContainText(/venció|utilizado|no es válido/i);
     await expect(page.getByRole("alert")).toContainText(/debe reemplazarse por uno nuevo/i);
+    await page.getByRole("link", { name: "Volver al inicio de sesión" }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("button", { name: /entrar al sistema/i })).toBeEnabled();
   });
 });

@@ -21,6 +21,7 @@ type PurchaseDraftInput = {
   quantity: number;
   unitCost: number;
   restock: boolean;
+  quickPurchase?: boolean;
 };
 export function validateSaleDraft(input: SaleDraftInput): Record<string, string>;
 export function validatePurchaseDraft(input: PurchaseDraftInput): Record<string, string>;

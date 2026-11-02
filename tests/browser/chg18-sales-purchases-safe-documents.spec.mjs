@@ -348,4 +348,89 @@ test.describe.serial("CHG-18 safe sales, purchases and documents", () => {
     expect(finalStock.data.quantity).toBe(originalStock);
     expect(deleteRequests).toHaveLength(0);
   });
+
+  test("records one quick cash purchase without creating or linking a supplier", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.goto("/purchases");
+    await page.getByRole("button", { name: "Nueva compra" }).click();
+    const dialog = page.getByRole("dialog");
+    const quickMode = dialog.getByRole("radio", {
+      name: "Compra rápida / Sin proveedor registrado",
+    });
+    await quickMode.focus();
+    await page.keyboard.press("Space");
+    await expect(quickMode).toBeChecked();
+    await expect(dialog.getByText("Proveedor no identificado")).toBeVisible();
+    await expect(dialog.locator("#purchase-supplier-name")).toHaveCount(0);
+
+    let postCalls = 0;
+    await page.route("**/rest/v1/rpc/post_purchase", async (route) => {
+      postCalls += 1;
+      await route.continue();
+    });
+    const paymentSelect = dialog.getByRole("combobox").nth(0);
+    await paymentSelect.click();
+    await page.getByRole("option", { name: /Crédito/ }).click();
+    await dialog.getByRole("button", { name: "Confirmar compra" }).click();
+    await expect(
+      dialog.locator('[role="alert"]').filter({ hasText: /proveedor registrado y activo/i }),
+    ).toBeVisible();
+    expect(postCalls).toBe(0);
+
+    await paymentSelect.click();
+    await page.getByRole("option", { name: /Contado/ }).click();
+    const invoice = `FIX02-${suffix}`;
+    await dialog.getByLabel(/Factura Proveedor/).fill(invoice);
+    const productSelect = dialog.getByRole("combobox").nth(1);
+    await productSelect.click();
+    await page.getByRole("option").filter({ hasText: sku }).click();
+    await dialog.getByLabel("Descripción de la compra").fill(`Compra rápida FIX02 ${suffix}`);
+    await dialog.getByLabel("Cantidad").fill("2");
+    await dialog.getByLabel("Costo unitario").fill("8.25");
+    await dialog.getByLabel(/Sumar 2 unidad/).check();
+
+    const supplierCountBefore = await service
+      .from("suppliers")
+      .select("id", { count: "exact", head: true });
+    if (supplierCountBefore.error) throw supplierCountBefore.error;
+    await dialog
+      .getByRole("button", { name: "Confirmar compra" })
+      .click({ clickCount: 2, delay: 10 });
+    await expect(dialog).toHaveCount(0);
+    expect(postCalls).toBe(1);
+
+    const purchases = await service
+      .from("purchases")
+      .select("id,supplier,supplier_id,item_id,payment_type,quantity,unit_cost,total")
+      .eq("invoice_no", invoice);
+    if (purchases.error) throw purchases.error;
+    expect(purchases.data).toHaveLength(1);
+    const purchase = purchases.data[0];
+    expect(purchase).toMatchObject({
+      supplier: "Proveedor no identificado",
+      supplier_id: null,
+      item_id: productId,
+      payment_type: "contado",
+      quantity: 2,
+      unit_cost: 8.25,
+      total: 16.5,
+    });
+
+    const supplierCountAfter = await service
+      .from("suppliers")
+      .select("id", { count: "exact", head: true });
+    if (supplierCountAfter.error) throw supplierCountAfter.error;
+    expect(supplierCountAfter.count).toBe(supplierCountBefore.count);
+    const stock = await service.from("inventory").select("quantity").eq("id", productId).single();
+    if (stock.error) throw stock.error;
+    expect(stock.data.quantity).toBe(originalStock + 2);
+    const credits = await service
+      .from("supplier_credits")
+      .select("id")
+      .eq("purchase_id", purchase.id);
+    if (credits.error) throw credits.error;
+    expect(credits.data).toHaveLength(0);
+  });
 });

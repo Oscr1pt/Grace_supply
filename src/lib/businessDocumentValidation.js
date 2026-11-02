@@ -51,15 +51,16 @@ export function validatePurchaseDraft({
   quantity,
   unitCost,
   restock,
+  quickPurchase = false,
 }) {
   const errors = {};
-  const supplier = suppliers.find((entry) => entry.id === supplierId);
-  if (!supplierName.trim())
+  const supplier = quickPurchase ? null : suppliers.find((entry) => entry.id === supplierId);
+  if (!quickPurchase && !supplierName.trim())
     errors.supplierName = "Escribe el nombre del proveedor o elige uno registrado.";
-  if (supplierId && (!supplier || supplier.status !== "activo")) {
+  if (!quickPurchase && supplierId && (!supplier || supplier.status !== "activo")) {
     errors.supplierId = "El proveedor seleccionado no está activo. Actualiza la lista.";
   }
-  if (paymentType === "credito" && !supplier) {
+  if (paymentType === "credito" && (quickPurchase || !supplier)) {
     errors.supplierId = "La compra a crédito requiere un proveedor registrado y activo.";
   }
   if (paymentType === "credito" && !invoiceNo.trim()) {

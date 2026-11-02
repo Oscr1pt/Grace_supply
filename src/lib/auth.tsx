@@ -57,6 +57,7 @@ type AuthCtx = {
   passwordSetupStatus: "none" | "pending" | "ready" | "error" | "complete";
   passwordSetupError: string | null;
   completePasswordSetup: () => void;
+  cancelPasswordSetup: () => Promise<void>;
   scopeKey: string;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -119,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const initializedAuth = useRef(false);
   const invalidationChannel = useRef<BroadcastChannel | null>(null);
   const passwordSetupIdentity = useRef<string | null>(null);
+  const passwordSetupFlowActive = useRef(false);
 
   const loadCurrentProfile = useCallback(async () => {
     const { data: authResult, error: authError } = await supabase.auth.getUser();
@@ -165,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const acceptSession = useCallback(
     async (session: Session | null, revision: number, announce = false) => {
+      if (revision !== authRevision.current) return;
       setAuthReady(false);
       if (!session) {
         const changed = !initializedAuth.current || currentIdentity.current !== null;
@@ -250,6 +253,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (initialAuthCallback.present) {
+      passwordSetupFlowActive.current = true;
       setPasswordSetupError(
         initialAuthCallback.hasError ? "El enlace venció, ya fue utilizado o no es válido." : null,
       );
@@ -261,10 +265,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         event === "SIGNED_IN" ||
         event === "PASSWORD_RECOVERY" ||
         (event === "INITIAL_SESSION" &&
-          initialAuthCallback.present &&
+          passwordSetupFlowActive.current &&
           !initialAuthCallback.hasError);
       if (
-        initialAuthCallback.present &&
+        passwordSetupFlowActive.current &&
         !initialAuthCallback.hasError &&
         session?.user &&
         isVerifiedCallbackSession
@@ -282,7 +286,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (
             revision === authRevision.current &&
             isVerifiedCallbackSession &&
-            initialAuthCallback.present &&
+            passwordSetupFlowActive.current &&
             !initialAuthCallback.hasError &&
             session?.user &&
             passwordSetupIdentity.current === session.user.id
@@ -299,7 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) {
         void acceptSession(null, initialRevision);
         if (
-          initialAuthCallback.present &&
+          passwordSetupFlowActive.current &&
           !initialAuthCallback.hasError &&
           !passwordSetupIdentity.current
         ) {
@@ -309,7 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (
-        initialAuthCallback.present &&
+        passwordSetupFlowActive.current &&
         !initialAuthCallback.hasError &&
         !passwordSetupIdentity.current
       ) {
@@ -508,6 +512,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPasswordSetupError(null);
     setPasswordSetupStatus("complete");
   }, []);
+  const cancelPasswordSetup = useCallback(async () => {
+    if (passwordSetupFlowActive.current) {
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) throw new Error("No se pudo cerrar la sesión temporal. Intenta de nuevo.");
+    }
+    passwordSetupFlowActive.current = false;
+    passwordSetupIdentity.current = null;
+    setPasswordSetupError(null);
+    setPasswordSetupStatus("none");
+  }, []);
   const can = useCallback(
     (permission: Permission) =>
       Boolean(user && (user.role === "admin" || user.permissions.includes(permission))),
@@ -526,6 +540,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         passwordSetupStatus,
         passwordSetupError,
         completePasswordSetup,
+        cancelPasswordSetup,
         scopeKey,
         login,
         logout,

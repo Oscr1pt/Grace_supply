@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,34 @@ export const Route = createFileRoute("/reset-password")({ component: ResetPasswo
 const accountRecoveryEnabled = import.meta.env.VITE_ACCOUNT_RECOVERY_ENABLED === "true";
 
 function ResetPasswordPage() {
-  const { passwordSetupStatus, passwordSetupError, completePasswordSetup } = useAuth();
+  const { passwordSetupStatus, passwordSetupError, completePasswordSetup, cancelPasswordSetup } =
+    useAuth();
+  const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{ password?: string; confirmation?: string }>({});
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [returnError, setReturnError] = useState<string | null>(null);
+  const [returningToLogin, setReturningToLogin] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const returnToLogin = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (busy || returningToLogin) return;
+    setReturningToLogin(true);
+    setReturnError(null);
+    try {
+      await cancelPasswordSetup();
+      await navigate({ to: "/login", replace: true });
+    } catch (error) {
+      setReturnError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo cerrar la sesión temporal. Intenta de nuevo.",
+      );
+      setReturningToLogin(false);
+    }
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -176,8 +198,20 @@ function ResetPasswordPage() {
             )}
           </div>
         )}
+        {returnError && (
+          <p role="alert" className="text-sm text-destructive">
+            {returnError}
+          </p>
+        )}
+        {returningToLogin && (
+          <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+            Cerrando la sesión temporal…
+          </p>
+        )}
         <Link
           to="/login"
+          onClick={returnToLogin}
+          aria-disabled={busy || returningToLogin}
           className="block text-sm text-[#D4AF37] underline-offset-4 hover:underline"
         >
           Volver al inicio de sesión

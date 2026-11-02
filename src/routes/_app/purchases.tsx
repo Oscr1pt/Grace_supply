@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,7 @@ const empty: Omit<Purchase, "id" | "createdAt" | "total"> = {
   quantity: 1,
   unitCost: 0,
 };
+const quickPurchaseSupplier = "Proveedor no identificado";
 
 function PurchasesPage() {
   const {
@@ -81,6 +83,7 @@ function PurchasesPage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(empty);
   const [supplierId, setSupplierId] = useState("");
+  const [quickPurchase, setQuickPurchase] = useState(false);
   const [paymentType, setPaymentType] = useState<"contado" | "credito">("contado");
   const [invoiceNo, setInvoiceNo] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -122,6 +125,7 @@ function PurchasesPage() {
         | {
             form?: typeof empty;
             supplierId?: string;
+            quickPurchase?: boolean;
             paymentType?: "contado" | "credito";
             invoiceNo?: string;
             dueDate?: string;
@@ -130,6 +134,7 @@ function PurchasesPage() {
         | undefined;
       if (context?.form) setForm(context.form);
       if (context?.supplierId) setSupplierId(context.supplierId);
+      if (typeof context?.quickPurchase === "boolean") setQuickPurchase(context.quickPurchase);
       if (context?.paymentType) setPaymentType(context.paymentType);
       if (context?.invoiceNo) setInvoiceNo(context.invoiceNo);
       if (context?.dueDate) setDueDate(context.dueDate);
@@ -147,8 +152,12 @@ function PurchasesPage() {
 
   const save = async () => {
     if (submitLock.current || pending || needsReconciliation || pendingOperationType) return;
-    const selectedSup = suppliers.find((s) => s.id === supplierId);
-    const supplierName = selectedSup ? selectedSup.name : form.supplier.trim();
+    const selectedSup = quickPurchase ? undefined : suppliers.find((s) => s.id === supplierId);
+    const supplierName = quickPurchase
+      ? quickPurchaseSupplier
+      : selectedSup
+        ? selectedSup.name
+        : form.supplier.trim();
     const cost = Number(form.unitCost);
     if (!user?.authUserId) {
       toast.error("La sesión no está confirmada. Inicia sesión antes de registrar la compra.");
@@ -167,6 +176,7 @@ function PurchasesPage() {
       quantity: form.quantity,
       unitCost: cost,
       restock: restock && Boolean(form.itemId),
+      quickPurchase,
     });
     if (inventoryError && form.itemId)
       errors.itemId =
@@ -183,7 +193,7 @@ function PurchasesPage() {
     const invNo = invoiceNo.trim() || "COMP-" + idempotencyKey.slice(0, 8).toUpperCase();
     const request = {
       idempotency_key: idempotencyKey,
-      supplier_id: selectedSup?.id ?? null,
+      supplier_id: quickPurchase ? null : (selectedSup?.id ?? null),
       supplier_name: supplierName,
       item_id: form.itemId || null,
       description: form.description.trim(),
@@ -201,7 +211,15 @@ function PurchasesPage() {
         type: "purchase",
         idempotencyKey,
         request,
-        context: { form, supplierId, paymentType, invoiceNo: invNo, dueDate, restock },
+        context: {
+          form,
+          supplierId,
+          quickPurchase,
+          paymentType,
+          invoiceNo: invNo,
+          dueDate,
+          restock,
+        },
       });
       setPendingOperationType("purchase");
       await postBusinessOperation("purchase", request);
@@ -216,6 +234,7 @@ function PurchasesPage() {
       setOpen(false);
       setForm(empty);
       setSupplierId("");
+      setQuickPurchase(false);
       setPaymentType("contado");
       setInvoiceNo("");
       setDueDate("");
@@ -257,6 +276,7 @@ function PurchasesPage() {
       setOpen(false);
       setForm(empty);
       setSupplierId("");
+      setQuickPurchase(false);
       setPaymentType("contado");
       setInvoiceNo("");
       setDueDate("");
@@ -436,60 +456,107 @@ function PurchasesPage() {
                     Cargando artículos activos…
                   </p>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Proveedor registrado" labelId="purchase-supplier-registered-label">
-                    <Select
-                      value={supplierId}
-                      onValueChange={(v) => {
-                        setSupplierId(v);
-                        setPurchaseValidationErrors({});
-                        const s = suppliers.find((x) => x.id === v);
-                        if (s) setForm({ ...form, supplier: s.name });
-                      }}
+                <div className="space-y-1.5">
+                  <p id="purchase-supplier-mode-label" className="text-sm font-medium leading-none">
+                    Tipo de proveedor
+                  </p>
+                  <RadioGroup
+                    value={quickPurchase ? "quick" : "supplier"}
+                    onValueChange={(value) => {
+                      setQuickPurchase(value === "quick");
+                      setPurchaseValidationErrors({});
+                    }}
+                    aria-labelledby="purchase-supplier-mode-label"
+                    className="grid grid-cols-1 sm:grid-cols-2 gap-2"
+                  >
+                    <Label
+                      htmlFor="purchase-supplier-mode-registered"
+                      className="flex min-h-11 items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-normal cursor-pointer"
                     >
-                      <SelectTrigger aria-labelledby="purchase-supplier-registered-label">
-                        <SelectValue placeholder="Elige un proveedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {suppliers.map((s) => (
-                          <SelectItem key={s.id} value={s.id} disabled={s.status !== "activo"}>
-                            {s.name} · ID {s.id.slice(0, 8)} ·{" "}
-                            {s.status === "activo" ? "Activo" : "Inactivo"}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {purchaseValidationErrors.supplierId && (
+                      <RadioGroupItem id="purchase-supplier-mode-registered" value="supplier" />
+                      <span>Con proveedor</span>
+                    </Label>
+                    <Label
+                      htmlFor="purchase-supplier-mode-quick"
+                      className="flex min-h-11 items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-normal cursor-pointer"
+                    >
+                      <RadioGroupItem
+                        id="purchase-supplier-mode-quick"
+                        value="quick"
+                        disabled={paymentType !== "contado"}
+                      />
+                      <span>Compra rápida / Sin proveedor registrado</span>
+                    </Label>
+                  </RadioGroup>
+                </div>
+
+                {quickPurchase ? (
+                  <div className="rounded-lg border border-[#D4AF37]/40 bg-[#D4AF37]/5 p-3">
+                    <p className="text-sm font-medium">{quickPurchaseSupplier}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Se registra al contado y no crea un proveedor en el catálogo. Para comprar a
+                      crédito, selecciona un proveedor registrado y activo.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field
+                      label="Proveedor registrado"
+                      labelId="purchase-supplier-registered-label"
+                    >
+                      <Select
+                        value={supplierId}
+                        onValueChange={(v) => {
+                          setSupplierId(v);
+                          setPurchaseValidationErrors({});
+                          const s = suppliers.find((x) => x.id === v);
+                          if (s) setForm({ ...form, supplier: s.name });
+                        }}
+                      >
+                        <SelectTrigger aria-labelledby="purchase-supplier-registered-label">
+                          <SelectValue placeholder="Elige un proveedor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {suppliers.map((s) => (
+                            <SelectItem key={s.id} value={s.id} disabled={s.status !== "activo"}>
+                              {s.name} · ID {s.id.slice(0, 8)} ·{" "}
+                              {s.status === "activo" ? "Activo" : "Inactivo"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {purchaseValidationErrors.supplierId && (
+                        <p role="alert" className="text-xs text-destructive">
+                          {purchaseValidationErrors.supplierId}
+                        </p>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Una compra a crédito solo admite proveedores registrados activos.
+                      </p>
+                    </Field>
+
+                    <Field
+                      label="Nombre del Proveedor (si no está en lista)"
+                      htmlFor="purchase-supplier-name"
+                    >
+                      <Input
+                        id="purchase-supplier-name"
+                        value={form.supplier}
+                        onChange={(e) => {
+                          setSupplierId("");
+                          setPurchaseValidationErrors({});
+                          setForm({ ...form, supplier: e.target.value });
+                        }}
+                        placeholder="Distribuidora Grace & Barber S.A."
+                      />
+                    </Field>
+                    {purchaseValidationErrors.supplierName && (
                       <p role="alert" className="text-xs text-destructive">
-                        {purchaseValidationErrors.supplierId}
+                        {purchaseValidationErrors.supplierName}
                       </p>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      Una compra a crédito solo admite proveedores registrados activos.
-                    </p>
-                  </Field>
-
-                  <Field
-                    label="Nombre del Proveedor (si no está en lista)"
-                    htmlFor="purchase-supplier-name"
-                  >
-                    <Input
-                      id="purchase-supplier-name"
-                      value={form.supplier}
-                      onChange={(e) => {
-                        setSupplierId("");
-                        setPurchaseValidationErrors({});
-                        setForm({ ...form, supplier: e.target.value });
-                      }}
-                      placeholder="Distribuidora Grace & Barber S.A."
-                    />
-                  </Field>
-                  {purchaseValidationErrors.supplierName && (
-                    <p role="alert" className="text-xs text-destructive">
-                      {purchaseValidationErrors.supplierName}
-                    </p>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Método de Pago" labelId="purchase-payment-method-label">
@@ -719,6 +786,7 @@ function PurchasesPage() {
                     setOpen(false);
                     setForm(empty);
                     setSupplierId("");
+                    setQuickPurchase(false);
                     setPaymentType("contado");
                     setInvoiceNo("");
                     setDueDate("");
