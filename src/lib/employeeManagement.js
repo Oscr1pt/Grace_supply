@@ -1,0 +1,106 @@
+const USERNAME_PATTERN = /^[a-z0-9._-]{3,64}$/i;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** @param {unknown} active */
+export function getEmployeeAccountStatus(active) {
+  return active === true
+    ? { label: "Cuenta activa", description: "El acceso está habilitado.", tone: "active" }
+    : {
+        label: "Cuenta inactiva",
+        description: "El correo se verifica en el servidor antes de activar el acceso.",
+        tone: "inactive",
+      };
+}
+
+/** @param {{ username?: unknown, name?: unknown, email?: unknown }} input */
+export function validateEmployeeInvitation(input) {
+  const errors = {};
+  const username = typeof input.username === "string" ? input.username.trim() : "";
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  const email = typeof input.email === "string" ? input.email.trim() : "";
+
+  if (!username) errors.username = "Escribe un nombre de usuario.";
+  else if (!USERNAME_PATTERN.test(username))
+    errors.username = "Usa entre 3 y 64 letras, números, puntos, guiones o guiones bajos.";
+  if (!name) errors.name = "Escribe el nombre de la persona.";
+  else if (name.length > 120) errors.name = "El nombre no puede superar 120 caracteres.";
+  if (!email) errors.email = "Escribe el correo individual de la persona.";
+  else if (!EMAIL_PATTERN.test(email)) errors.email = "Escribe un correo válido.";
+
+  return errors;
+}
+
+/** @param {unknown} result @param {string} username @param {{active?: boolean, name?: string, role?: string, permissions?: string[]}} [expected] */
+export function requireConfirmedEmployeeProfile(result, username, expected = {}) {
+  const profile =
+    result && typeof result === "object" && "profile" in result ? result.profile : null;
+  if (
+    !profile ||
+    typeof profile !== "object" ||
+    typeof profile.username !== "string" ||
+    profile.username.toLowerCase() !== username.trim().toLowerCase() ||
+    typeof profile.active !== "boolean" ||
+    !["admin", "employee"].includes(profile.role) ||
+    !Array.isArray(profile.permissions)
+  ) {
+    throw new Error(
+      "El servidor no confirmó el estado de la cuenta. Actualiza la lista antes de repetir.",
+    );
+  }
+  if (Object.hasOwn(expected, "active") && profile.active !== expected.active) {
+    throw new Error(
+      "El servidor no confirmó el estado solicitado. Actualiza la lista antes de repetir.",
+    );
+  }
+  if (expected.name && profile.name !== expected.name) {
+    throw new Error(
+      "El servidor no confirmó el nombre solicitado. Actualiza la lista antes de repetir.",
+    );
+  }
+  if (expected.role && profile.role !== expected.role) {
+    throw new Error(
+      "El servidor no confirmó el rol solicitado. Actualiza la lista antes de repetir.",
+    );
+  }
+  if (expected.permissions) {
+    const actual = [...profile.permissions].sort();
+    const wanted = [...expected.permissions].sort();
+    if (
+      actual.length !== wanted.length ||
+      actual.some((permission, index) => permission !== wanted[index])
+    ) {
+      throw new Error(
+        "El servidor no confirmó los permisos solicitados. Actualiza la lista antes de repetir.",
+      );
+    }
+  }
+  return profile;
+}
+
+/** @param {unknown} error @param {"invite"|"activate"|"update"|"revoke"} action */
+export function employeeActionErrorMessage(error, action) {
+  const status =
+    error && typeof error === "object" && "context" in error && error.context instanceof Response
+      ? error.context.status
+      : error && typeof error === "object" && "status" in error
+        ? Number(error.status)
+        : 0;
+  if (status === 401) return "Tu sesión venció. Inicia sesión nuevamente.";
+  if (status === 403) return "No tienes permiso para administrar esta cuenta.";
+  if (status === 423) return "La cuenta requiere revisión administrativa antes de activarse.";
+  if (status === 503 && action === "invite")
+    return "Las invitaciones no están habilitadas en este entorno.";
+  if (status === 409) {
+    if (action === "invite")
+      return "No se pudo completar la invitación. Verifica el usuario y el estado de la cuenta.";
+    if (action === "activate")
+      return "El servidor no pudo confirmar la activación. Verifica el estado de la cuenta.";
+    if (action === "revoke")
+      return "No se pudo confirmar la revocación. Actualiza el estado antes de repetir.";
+    return "No se pudo guardar el cambio. El perfil pudo cambiar en otra sesión.";
+  }
+  if (error instanceof TypeError || status === 0) {
+    return "No se pudo confirmar la respuesta del servidor. Actualiza la lista antes de repetir.";
+  }
+  return "No se pudo completar el cambio. Conserva los datos e inténtalo de nuevo.";
+}

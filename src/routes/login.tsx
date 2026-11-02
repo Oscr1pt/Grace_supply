@@ -20,7 +20,7 @@ function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ username?: string; password?: string; form?: string }>({});
 
   useEffect(() => {
     if (passwordSetupStatus !== "none" && passwordSetupStatus !== "complete") {
@@ -32,18 +32,25 @@ function LoginPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password) {
-      setError("Ingresa tu usuario y contraseña.");
+    if (busy) return;
+    const nextErrors: typeof errors = {};
+    if (!username.trim()) nextErrors.username = "Escribe tu nombre de usuario.";
+    if (!password) nextErrors.password = "Escribe tu contraseña.";
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors);
+      document.getElementById(nextErrors.username ? "username" : "password")?.focus();
       return;
     }
     setBusy(true);
-    setError(null);
+    setErrors({});
     try {
-      await login(username, password);
+      await login(username.trim(), password);
       toast.success("Bienvenido de nuevo a Grace Supply");
     } catch (err) {
       setPassword("");
-      setError(err instanceof Error ? err.message : "No se pudo iniciar sesión. Intenta de nuevo.");
+      setErrors({
+        form: err instanceof Error ? err.message : "No se pudo iniciar sesión. Intenta de nuevo.",
+      });
     } finally {
       setBusy(false);
     }
@@ -84,11 +91,13 @@ function LoginPage() {
               <span>Estilo, Elegancia & Calidad Premium</span>
             </div>
             <h2 className="font-display text-5xl leading-tight text-[#FFFFFF] tracking-tight">
-              Excelencia y estilo<br />
+              Excelencia y estilo
+              <br />
               <span className="text-[#D4AF37]">en cada detalle.</span>
             </h2>
             <p className="mt-5 text-neutral-400 text-base max-w-md leading-relaxed">
-              La suite completa de gestión de ventas, inventario y clientes — diseñada para profesionales de barbería, estética y cuidado personal.
+              La suite completa de gestión de ventas, inventario y clientes — diseñada para
+              profesionales de barbería, estética y cuidado personal.
             </p>
           </div>
 
@@ -117,14 +126,31 @@ function LoginPage() {
               Iniciar sesión
             </h1>
             <p className="text-sm text-neutral-400">
-              Ingresa tus credenciales para acceder al panel de control de <span className="text-[#D4AF37] font-medium">GRACE SUPPLY</span>.
+              Ingresa tus credenciales para acceder al panel de control de{" "}
+              <span className="text-[#D4AF37] font-medium">GRACE SUPPLY</span>.
             </p>
           </div>
 
-          <form onSubmit={submit} noValidate className="space-y-5">
-            {error && <div id="login-error" role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+          <form onSubmit={submit} noValidate aria-busy={busy || !authReady} className="space-y-5">
+            {errors.form && (
+              <div
+                id="login-error"
+                role="alert"
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                {errors.form}
+              </div>
+            )}
+            {!authReady && (
+              <p role="status" aria-live="polite" className="text-sm text-neutral-400">
+                Verificando la sesión local…
+              </p>
+            )}
             <div className="space-y-2">
-              <Label htmlFor="username" className="text-xs uppercase tracking-wider text-neutral-300 font-medium">
+              <Label
+                htmlFor="username"
+                className="text-xs uppercase tracking-wider text-neutral-300 font-medium"
+              >
                 Usuario
               </Label>
               <Input
@@ -134,15 +160,28 @@ function LoginPage() {
                 autoComplete="username"
                 placeholder="Ingresa tu usuario"
                 value={username}
-                aria-invalid={Boolean(error)}
-                aria-describedby={error ? "login-error" : undefined}
-                onChange={(e) => setUsername(e.target.value)}
+                aria-invalid={Boolean(errors.username || errors.form)}
+                aria-describedby={
+                  errors.username ? "username-error" : errors.form ? "login-error" : undefined
+                }
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setErrors((current) => ({ ...current, username: undefined, form: undefined }));
+                }}
                 className="bg-[#121212] border-[#262626] text-[#F5F5F5] placeholder:text-neutral-600 focus:border-[#D4AF37] focus:ring-[#D4AF37]/20 h-11"
               />
+              {errors.username && (
+                <p id="username-error" role="alert" className="text-xs text-destructive">
+                  {errors.username}
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-xs uppercase tracking-wider text-neutral-300 font-medium">
+              <Label
+                htmlFor="password"
+                className="text-xs uppercase tracking-wider text-neutral-300 font-medium"
+              >
                 Contraseña
               </Label>
               <Input
@@ -152,11 +191,21 @@ function LoginPage() {
                 autoComplete="current-password"
                 placeholder="••••••••"
                 value={password}
-                aria-invalid={Boolean(error)}
-                aria-describedby={error ? "login-error" : undefined}
-                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={Boolean(errors.password || errors.form)}
+                aria-describedby={
+                  errors.password ? "password-error" : errors.form ? "login-error" : undefined
+                }
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setErrors((current) => ({ ...current, password: undefined, form: undefined }));
+                }}
                 className="bg-[#121212] border-[#262626] text-[#F5F5F5] placeholder:text-neutral-600 focus:border-[#D4AF37] focus:ring-[#D4AF37]/20 h-11"
               />
+              {errors.password && (
+                <p id="password-error" role="alert" className="text-xs text-destructive">
+                  {errors.password}
+                </p>
+              )}
             </div>
 
             <Button
@@ -164,16 +213,22 @@ function LoginPage() {
               disabled={busy || !authReady}
               className="w-full h-11 bg-[#D4AF37] text-[#050505] hover:bg-[#E5C158] font-semibold text-sm transition-all duration-200 shadow-md shadow-[#D4AF37]/20 border-0"
             >
-              {busy ? "Verificando…" : !authReady ? "Verificando sesión…" : "Entrar al sistema"}
+              {busy ? "Ingresando…" : !authReady ? "Verificando sesión…" : "Entrar al sistema"}
             </Button>
           </form>
 
           {accountRecoveryEnabled ? (
-            <Link to="/recover" className="block text-center text-sm text-[#D4AF37] underline-offset-4 hover:underline">
+            <Link
+              to="/recover"
+              className="block text-center text-sm text-[#D4AF37] underline-offset-4 hover:underline"
+            >
               ¿Olvidaste tu contraseña?
             </Link>
           ) : (
-            <p role="note" className="text-center text-xs text-neutral-500">La recuperacion se habilitara tras verificar el correo transaccional y las URL de este entorno.</p>
+            <p role="note" className="text-center text-xs text-neutral-500">
+              La recuperación se habilitará tras verificar el correo transaccional y las URL de este
+              entorno.
+            </p>
           )}
 
           <p className="text-center text-xs text-neutral-600 pt-4">

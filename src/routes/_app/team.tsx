@@ -1,206 +1,448 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { useAuth, PERMISSIONS, ALL_PERMISSIONS, DEFAULT_EMPLOYEE_PERMISSIONS, type Permission, type Role, type User } from "@/lib/auth";
+import { useRef, useState } from "react";
+import {
+  useAuth,
+  PERMISSIONS,
+  ALL_PERMISSIONS,
+  DEFAULT_EMPLOYEE_PERMISSIONS,
+  type Permission,
+  type Role,
+  type User,
+} from "@/lib/auth";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Trash2, ShieldCheck, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { userPersistenceMessage } from "@/lib/persistence.js";
+import { getEmployeeAccountStatus, validateEmployeeInvitation } from "@/lib/employeeManagement.js";
 
-export const Route = createFileRoute("/_app/team")({
-  component: TeamPage,
-});
+export const Route = createFileRoute("/_app/team")({ component: TeamPage });
 
 const employeeProvisioningEnabled = import.meta.env.VITE_ACCOUNT_PROVISIONING_ENABLED === "true";
+type Invitation = { username: string; name: string; email: string };
+type InvitationErrors = Partial<Record<keyof Invitation, string>>;
+type SecurityAction =
+  | { kind: "activate"; target: User }
+  | { kind: "role"; target: User; role: Role }
+  | { kind: "revoke"; target: User };
 
 function TeamPage() {
-  const { user, users, updateEmployee, removeEmployee, inviteEmployee, activateEmployee } = useAuth();
-  const [pending, setPending] = useState(false);
-  const [revokeTarget, setRevokeTarget] = useState<User | null>(null);
-  const [invite, setInvite] = useState({ username: "", name: "", email: "" });
+  const {
+    user,
+    users,
+    usersStatus,
+    usersError,
+    refreshUsers,
+    updateEmployee,
+    removeEmployee,
+    inviteEmployee,
+    activateEmployee,
+  } = useAuth();
+  const actionLock = useRef(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [securityAction, setSecurityAction] = useState<SecurityAction | null>(null);
+  const [invite, setInvite] = useState<Invitation>({ username: "", name: "", email: "" });
+  const [inviteErrors, setInviteErrors] = useState<InvitationErrors>({});
+
+  const runAction = async (key: string, operation: () => Promise<void>) => {
+    if (actionLock.current) return false;
+    actionLock.current = true;
+    setPendingAction(key);
+    try {
+      await operation();
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : userPersistenceMessage(error));
+      return false;
+    } finally {
+      actionLock.current = false;
+      setPendingAction(null);
+    }
+  };
 
   const submitInvite = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (pending) return;
-    setPending(true);
-    try {
-      await inviteEmployee(invite);
-      toast.success("Invitation sent. The account remains inactive until email confirmation.");
-      setInvite({ username: "", name: "", email: "" });
-    } catch (error) {
-      toast.error(userPersistenceMessage(error));
-    } finally {
-      setPending(false);
+    const errors = validateEmployeeInvitation(invite);
+    setInviteErrors(errors);
+    const firstInvalid = (Object.keys(errors) as (keyof Invitation)[])[0];
+    if (firstInvalid) {
+      document.getElementById(`employee-${firstInvalid}`)?.focus();
+      return;
     }
-  };
-
-  const activate = async (username: string) => {
-    if (pending) return;
-    setPending(true);
-    try {
-      await activateEmployee(username);
-      toast.success("Verified email and activated account.");
-    } catch (error) {
-      toast.error(userPersistenceMessage(error));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const togglePerm = async (username: string, current: Permission[], perm: Permission) => {
-    const next = current.includes(perm) ? current.filter((p) => p !== perm) : [...current, perm];
-    setPending(true);
-    try {
-      await updateEmployee(username, { permissions: next });
-      toast.success("Permisos actualizados");
-    } catch (error) {
-      toast.error(userPersistenceMessage(error));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const changeRole = async (username: string, role: Role) => {
-    setPending(true);
-    try {
-      await updateEmployee(username, {
-        role,
-        permissions: role === "admin" ? ALL_PERMISSIONS : DEFAULT_EMPLOYEE_PERMISSIONS,
+    const confirmed = await runAction("invite", async () => {
+      await inviteEmployee({
+        username: invite.username.trim(),
+        name: invite.name.trim(),
+        email: invite.email.trim(),
       });
-      toast.success("Rol actualizado");
-    } catch (error) {
-      toast.error(userPersistenceMessage(error));
-    } finally {
-      setPending(false);
-    }
+      toast.success(
+        "Invitación registrada. La cuenta permanece inactiva hasta verificar el correo y activar el acceso.",
+      );
+      setInvite({ username: "", name: "", email: "" });
+      setInviteErrors({});
+    });
+    if (!confirmed) return;
   };
 
-  const revokeEmployee = async () => {
-    if (!revokeTarget || pending) return;
-    setPending(true);
-    try {
-      await removeEmployee(revokeTarget.username);
-      toast.success("Acceso revocado");
-      setRevokeTarget(null);
-    } catch (error) {
-      toast.error(userPersistenceMessage(error));
-    } finally {
-      setPending(false);
-    }
+  const togglePermission = (target: User, permission: Permission) => {
+    const next = target.permissions.includes(permission)
+      ? target.permissions.filter((current) => current !== permission)
+      : [...target.permissions, permission];
+    void runAction(`permission:${target.username}:${permission}`, async () => {
+      await updateEmployee(target.username, { permissions: next });
+      toast.success("Permisos actualizados.");
+    });
   };
+
+  const confirmSecurityAction = async () => {
+    if (!securityAction) return;
+    const action = securityAction;
+    const completed = await runAction(`${action.kind}:${action.target.username}`, async () => {
+      if (action.kind === "activate") {
+        await activateEmployee(action.target.username);
+        toast.success("El servidor confirmó la activación de la cuenta.");
+      } else if (action.kind === "role") {
+        await updateEmployee(action.target.username, {
+          role: action.role,
+          permissions: action.role === "admin" ? ALL_PERMISSIONS : DEFAULT_EMPLOYEE_PERMISSIONS,
+        });
+        toast.success("El servidor confirmó el cambio de rol.");
+      } else {
+        await removeEmployee(action.target.username);
+        toast.success("El servidor confirmó la revocación del acceso.");
+      }
+    });
+    if (completed) setSecurityAction(null);
+  };
+
+  const actionTitle =
+    securityAction?.kind === "activate"
+      ? "¿Activar esta cuenta?"
+      : securityAction?.kind === "role"
+        ? securityAction.role === "admin"
+          ? "¿Dar acceso de administrador?"
+          : "¿Cambiar a empleado?"
+        : "¿Revocar este acceso?";
+  const actionDescription =
+    securityAction?.kind === "activate"
+      ? `${securityAction.target.name} solo obtendrá acceso si el servidor confirma el correo y la activación.`
+      : securityAction?.kind === "role"
+        ? securityAction.role === "admin"
+          ? `${securityAction.target.name} recibirá acceso administrativo a todas las secciones. El servidor conserva la autorización final.`
+          : `${securityAction.target.name} pasará a tener los permisos iniciales de empleado.`
+        : securityAction
+          ? `${securityAction.target.name} dejará de acceder a Grace Supply. Sus registros se conservarán.`
+          : "";
+  const actionButtonLabel =
+    securityAction?.kind === "activate"
+      ? "Confirmar activación"
+      : securityAction?.kind === "role"
+        ? "Confirmar cambio"
+        : "Revocar acceso";
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title="Empleados y permisos"
-        description="Administra los permisos y revoca accesos confirmados."
+        description="Administra los accesos. Los cambios sensibles requieren confirmación del servidor."
       />
 
       {employeeProvisioningEnabled ? (
-        <form onSubmit={submitInvite} className="mb-6 grid gap-3 rounded-lg border border-border bg-card p-5 md:grid-cols-3">
-          <div className="space-y-1.5"><Label htmlFor="employee-username">Usuario</Label><Input id="employee-username" autoComplete="off" value={invite.username} onChange={(event) => setInvite({ ...invite, username: event.target.value })} required /></div>
-          <div className="space-y-1.5"><Label htmlFor="employee-name">Nombre</Label><Input id="employee-name" autoComplete="name" value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} required /></div>
-          <div className="space-y-1.5"><Label htmlFor="employee-email">Correo individual</Label><Input id="employee-email" type="email" autoComplete="email" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} required /></div>
-          <p className="text-xs text-muted-foreground md:col-span-2">Invitacion de empleado con permiso inicial de ventas. El perfil queda inactivo hasta verificar el correo. El servidor no permite crear administradores.</p>
-          <Button type="submit" disabled={pending || !invite.username.trim() || !invite.name.trim() || !invite.email.trim()} className="bg-[#D4AF37] text-black hover:bg-[#E5C158]">{pending ? "Enviando..." : "Invitar empleado"}</Button>
+        <form
+          onSubmit={submitInvite}
+          noValidate
+          aria-busy={pendingAction === "invite"}
+          className="mb-6 grid gap-4 rounded-lg border border-border bg-card p-4 sm:p-5 md:grid-cols-3"
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="employee-username">Usuario</Label>
+            <Input
+              id="employee-username"
+              autoComplete="off"
+              maxLength={64}
+              value={invite.username}
+              aria-invalid={Boolean(inviteErrors.username)}
+              aria-describedby={
+                inviteErrors.username ? "employee-username-error" : "employee-username-hint"
+              }
+              onChange={(event) => {
+                setInvite({ ...invite, username: event.target.value });
+                setInviteErrors((current) => ({ ...current, username: undefined }));
+              }}
+            />
+            <p id="employee-username-hint" className="text-xs text-muted-foreground">
+              De 3 a 64 letras, números, puntos, guiones o guiones bajos.
+            </p>
+            {inviteErrors.username && (
+              <p id="employee-username-error" role="alert" className="text-xs text-destructive">
+                {inviteErrors.username}
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="employee-name">Nombre</Label>
+            <Input
+              id="employee-name"
+              autoComplete="name"
+              maxLength={120}
+              value={invite.name}
+              aria-invalid={Boolean(inviteErrors.name)}
+              aria-describedby={inviteErrors.name ? "employee-name-error" : undefined}
+              onChange={(event) => {
+                setInvite({ ...invite, name: event.target.value });
+                setInviteErrors((current) => ({ ...current, name: undefined }));
+              }}
+            />
+            {inviteErrors.name && (
+              <p id="employee-name-error" role="alert" className="text-xs text-destructive">
+                {inviteErrors.name}
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="employee-email">Correo individual</Label>
+            <Input
+              id="employee-email"
+              type="email"
+              autoComplete="email"
+              value={invite.email}
+              aria-invalid={Boolean(inviteErrors.email)}
+              aria-describedby={inviteErrors.email ? "employee-email-error" : undefined}
+              onChange={(event) => {
+                setInvite({ ...invite, email: event.target.value });
+                setInviteErrors((current) => ({ ...current, email: undefined }));
+              }}
+            />
+            {inviteErrors.email && (
+              <p id="employee-email-error" role="alert" className="text-xs text-destructive">
+                {inviteErrors.email}
+              </p>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            La invitación crea un perfil inactivo con permisos iniciales de ventas. No confirma la
+            entrega del correo ni activa el acceso.
+          </p>
+          <Button
+            type="submit"
+            disabled={Boolean(pendingAction)}
+            className="w-full bg-[#D4AF37] text-black hover:bg-[#E5C158] md:self-end"
+          >
+            {pendingAction === "invite" ? "Enviando invitación…" : "Invitar empleado"}
+          </Button>
+          {pendingAction === "invite" && (
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-sm text-muted-foreground md:col-span-3"
+            >
+              Esperando confirmación del servidor…
+            </p>
+          )}
         </form>
       ) : (
-        <div role="note" className="mb-6 rounded-lg border border-[#D4AF37]/30 bg-[#D4AF37]/[0.06] px-4 py-3 text-sm text-muted-foreground">
-          El aprovisionamiento esta apagado hasta verificar el correo transaccional y las URL del entorno. Cada invitacion administrativa requiere un correo individual; no hay registro publico ni alta de administradores.
+        <div
+          role="note"
+          className="mb-6 rounded-lg border border-[#D4AF37]/30 bg-[#D4AF37]/[0.06] px-4 py-3 text-sm text-muted-foreground"
+        >
+          Las invitaciones están deshabilitadas hasta verificar el correo transaccional y las URL de
+          este entorno. No hay registro público ni creación de administradores por invitación.
         </div>
       )}
 
-      <div className="space-y-4">
-        {users.map((u) => {
-          const isSelf = u.username.toLowerCase() === user?.username.toLowerCase();
-          const admin = u.role === "admin";
-          return (
-            <div key={u.username} className="rounded-lg border border-border bg-card p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className={`h-9 w-9 rounded-full grid place-items-center ${admin ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-                    {admin ? <ShieldCheck className="h-4 w-4" /> : <UserIcon className="h-4 w-4" />}
+      {usersStatus === "loading" ? (
+        <div role="status" aria-live="polite" className="space-y-3">
+          <p className="text-sm text-muted-foreground">Cargando cuentas de empleados…</p>
+          <div className="h-24 animate-pulse rounded-lg border border-border bg-card" />
+        </div>
+      ) : usersStatus === "error" ? (
+        <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="text-sm">{usersError ?? "No se pudieron cargar las cuentas."}</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-3"
+            disabled={Boolean(pendingAction)}
+            onClick={() => void refreshUsers()}
+          >
+            Reintentar
+          </Button>
+        </div>
+      ) : users.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-8 text-center">
+          <p className="font-medium">No hay cuentas de empleados para mostrar.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Las cuentas aparecerán aquí cuando el servidor confirme su creación.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {users.map((employee) => {
+            const isSelf = employee.username.toLowerCase() === user?.username.toLowerCase();
+            const isAdmin = employee.role === "admin";
+            const status = getEmployeeAccountStatus(employee.active);
+            return (
+              <article
+                key={employee.username}
+                className="rounded-lg border border-border bg-card p-4 sm:p-5"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div
+                      className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full ${isAdmin ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
+                    >
+                      {isAdmin ? (
+                        <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <UserIcon className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <h2 className="break-words font-medium">
+                        {employee.name}{" "}
+                        {isSelf && <span className="text-xs text-muted-foreground">(tú)</span>}
+                      </h2>
+                      <p className="break-all font-mono text-xs text-muted-foreground">
+                        @{employee.username}
+                      </p>
+                      <p
+                        className={`mt-1 text-xs font-medium ${status.tone === "active" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}
+                      >
+                        {status.label}
+                      </p>
+                      {!employee.active && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">{status.description}</p>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <div className="font-medium">{u.name} {isSelf && <span className="text-xs text-muted-foreground">(tú)</span>}</div>
-                    <div className="text-xs text-muted-foreground font-mono">@{u.username}</div>
-                    {!u.active && <div className="text-xs text-amber-500">Pendiente de correo confirmado</div>}
+
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+                    {!employee.active && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={Boolean(pendingAction)}
+                        onClick={() => setSecurityAction({ kind: "activate", target: employee })}
+                      >
+                        Activar cuenta
+                      </Button>
+                    )}
+                    <Select
+                      value={employee.role}
+                      onValueChange={(value) => {
+                        if (value !== employee.role)
+                          setSecurityAction({
+                            kind: "role",
+                            target: employee,
+                            role: value as Role,
+                          });
+                      }}
+                      disabled={isSelf || Boolean(pendingAction)}
+                    >
+                      <SelectTrigger
+                        className="w-full sm:w-40"
+                        aria-label={`Rol de ${employee.name}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="employee">Empleado</SelectItem>
+                        <SelectItem value="admin">Administrador</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={isSelf || Boolean(pendingAction)}
+                      aria-label={`Revocar acceso a ${employee.name}`}
+                      onClick={() => setSecurityAction({ kind: "revoke", target: employee })}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
+                      Revocar
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {!u.active && <Button size="sm" variant="outline" disabled={pending} onClick={() => void activate(u.username)}>Activar</Button>}
-                  <Select
-                    value={u.role}
-                    onValueChange={(v) => void changeRole(u.username, v as Role)}
-                    disabled={isSelf || pending}
-                  >
-                    <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="employee">Empleado</SelectItem>
-                      <SelectItem value="admin">Administrador</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    disabled={isSelf || pending}
-                    aria-label={`Revocar acceso a ${u.name}`}
-                    title="Revocar acceso"
-                    onClick={() => setRevokeTarget(u)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+
+                <div className="mt-4 border-t border-border pt-4">
+                  {isAdmin ? (
+                    <p className="text-xs text-muted-foreground">
+                      Los administradores tienen acceso completo a todas las secciones.
+                    </p>
+                  ) : (
+                    <fieldset disabled={Boolean(pendingAction)} className="min-w-0">
+                      <legend className="mb-2 text-xs font-medium text-muted-foreground">
+                        Permisos de acceso
+                      </legend>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {PERMISSIONS.map((permission) => (
+                          <label
+                            key={permission.key}
+                            className="flex min-h-10 items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+                          >
+                            <Checkbox
+                              checked={employee.permissions.includes(permission.key)}
+                              disabled={Boolean(pendingAction)}
+                              onCheckedChange={() => togglePermission(employee, permission.key)}
+                            />
+                            <span>{permission.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  )}
                 </div>
-              </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
 
-              <div className="mt-4 pt-4 border-t border-border">
-                {admin ? (
-                  <p className="text-xs text-muted-foreground">Los administradores tienen acceso completo a todas las secciones.</p>
-                ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                    {PERMISSIONS.map((p) => (
-                      <label key={p.key} className="flex items-center gap-2 text-sm rounded-md border border-border px-3 py-2">
-                        <Checkbox
-                          checked={u.permissions.includes(p.key)}
-                            disabled={pending}
-                            onCheckedChange={() => void togglePerm(u.username, u.permissions, p.key)}
-                        />
-                        {p.label}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <AlertDialog open={Boolean(revokeTarget)} onOpenChange={(open) => !pending && !open && setRevokeTarget(null)}>
+      <AlertDialog
+        open={Boolean(securityAction)}
+        onOpenChange={(open) => !pendingAction && !open && setSecurityAction(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Revocar este acceso?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {revokeTarget?.name} dejará de acceder a Grace Supply. Sus registros se conservarán.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{actionTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{actionDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={pending}>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={Boolean(pendingAction)}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              disabled={pending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(event) => { event.preventDefault(); void revokeEmployee(); }}
+              disabled={Boolean(pendingAction)}
+              className={
+                securityAction?.kind === "revoke"
+                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  : undefined
+              }
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmSecurityAction();
+              }}
             >
-              {pending ? "Revocando…" : "Revocar acceso"}
+              {pendingAction ? "Guardando…" : actionButtonLabel}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
