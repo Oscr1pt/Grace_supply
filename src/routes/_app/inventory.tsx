@@ -41,6 +41,13 @@ import {
   resolveCatalogCategory,
 } from "@/lib/catalog.js";
 import { persistenceFailure } from "@/lib/persistence.js";
+import { validateInventoryAdjustment } from "@/lib/inventoryAdjustment.js";
+import { postBusinessOperation } from "@/lib/businessOperations";
+import {
+  clearPendingBusinessOperation,
+  persistPendingBusinessOperation,
+  readPendingBusinessOperation,
+} from "@/lib/pendingBusinessOperation.js";
 
 export const Route = createFileRoute("/_app/inventory")({
   component: InventoryPage,
@@ -85,7 +92,7 @@ function genSku() {
 }
 
 function InventoryPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, can, scopeKey } = useAuth();
   const {
     data: items,
     loading,
@@ -109,6 +116,12 @@ function InventoryPage() {
   const [savingLabelSettings, setSavingLabelSettings] = useState(false);
   const [pending, setPending] = useState(false);
   const [pendingRows, setPendingRows] = useState<Set<string>>(() => new Set());
+  const [adjusting, setAdjusting] = useState<InventoryItem | null>(null);
+  const [adjustmentTarget, setAdjustmentTarget] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [adjustmentError, setAdjustmentError] = useState<string | null>(null);
+  const [adjustmentPending, setAdjustmentPending] = useState(false);
+  const [adjustmentUncertain, setAdjustmentUncertain] = useState(false);
   const categories = getCatalogCategories(items);
 
   const startNew = () => {
@@ -233,6 +246,84 @@ function InventoryPage() {
         next.delete(item.id);
         return next;
       });
+    }
+  };
+
+  const openAdjustment = (item: InventoryItem) => {
+    setAdjusting(item);
+    setAdjustmentTarget(String(item.quantity));
+    setAdjustmentReason("");
+    setAdjustmentError(null);
+    setAdjustmentUncertain(false);
+  };
+
+  const submitAdjustment = async () => {
+    if (!adjusting || adjustmentPending) return;
+    const validation = validateInventoryAdjustment({
+      currentQuantity: adjusting.quantity,
+      targetQuantity: adjustmentTarget,
+      reason: adjustmentReason,
+    });
+    if (!validation.ok) {
+      setAdjustmentError(validation.error);
+      return;
+    }
+    const { delta, reason } = validation;
+    setAdjustmentPending(true);
+    setAdjustmentError(null);
+    const storage = typeof window === "undefined" ? null : window.sessionStorage;
+    const pending = storage && scopeKey ? readPendingBusinessOperation(storage, scopeKey) : null;
+    if (
+      pending?.type === "inventory_adjustment" &&
+      (pending.request.item_id !== adjusting.id ||
+        pending.request.expected_quantity !== adjusting.quantity ||
+        pending.request.delta !== delta ||
+        pending.request.reason !== reason)
+    ) {
+      setAdjustmentError("Ya existe otro ajuste pendiente de conciliación para esta sesión.");
+      setAdjustmentPending(false);
+      return;
+    }
+    const request =
+      pending?.type === "inventory_adjustment"
+        ? pending.request
+        : (() => {
+            const operationKey = globalThis.crypto.randomUUID();
+            return {
+              operation_id: operationKey,
+              idempotency_key: operationKey,
+              item_id: adjusting.id,
+              expected_quantity: adjusting.quantity,
+              delta,
+              reason,
+            };
+          })();
+    try {
+      if (storage && scopeKey) {
+        persistPendingBusinessOperation(storage, scopeKey, {
+          type: "inventory_adjustment",
+          idempotencyKey: String(request.idempotency_key),
+          request,
+        });
+      }
+      const result = await postBusinessOperation(
+        "inventory_adjustment",
+        request as typeof request & { idempotency_key: string },
+      );
+      const confirmedQuantity = Number(result.quantity);
+      setAdjusting((current) => (current ? { ...current, quantity: confirmedQuantity } : current));
+      await refresh();
+      if (storage && scopeKey)
+        clearPendingBusinessOperation(storage, scopeKey, String(request.idempotency_key));
+      setAdjustmentUncertain(false);
+      setAdjusting(null);
+      toast.success("Existencia ajustada y auditada");
+    } catch (error) {
+      const failure = persistenceFailure(error, true);
+      setAdjustmentError(failure.message);
+      setAdjustmentUncertain(failure.kind === "uncertain");
+    } finally {
+      setAdjustmentPending(false);
     }
   };
 
@@ -641,6 +732,19 @@ function InventoryPage() {
                         >
                           <Power className="h-4 w-4" />
                         </Button>
+                        {can("inventory") && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => openAdjustment(i)}
+                            disabled={pendingRows.has(i.id)}
+                            aria-label={`Ajustar existencia de ${i.name}`}
+                            title="Ajustar existencia"
+                            className="hover:text-[#D4AF37]"
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -690,6 +794,80 @@ function InventoryPage() {
               className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0"
             >
               <Printer className="h-4 w-4 mr-1.5" /> Imprimir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!adjusting}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !adjustmentPending) setAdjusting(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Ajustar existencia</DialogTitle>
+          </DialogHeader>
+          {adjusting && (
+            <div className="space-y-4">
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <p className="font-medium">{adjusting.name}</p>
+                <p className="text-xs text-muted-foreground">SKU: {adjusting.sku}</p>
+                <p className="mt-2">
+                  Existencia confirmada: <strong>{adjusting.quantity}</strong>
+                </p>
+              </div>
+              <Field label="Existencia objetivo">
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={adjustmentTarget}
+                  disabled={adjustmentPending}
+                  aria-invalid={Boolean(adjustmentError)}
+                  onChange={(event) => setAdjustmentTarget(event.target.value)}
+                />
+              </Field>
+              <p className="text-sm text-muted-foreground" role="status">
+                Diferencia a aplicar:{" "}
+                {Number.isInteger(Number(adjustmentTarget))
+                  ? Number(adjustmentTarget) - adjusting.quantity
+                  : "—"}
+              </p>
+              <Field label="Motivo obligatorio">
+                <Textarea
+                  value={adjustmentReason}
+                  maxLength={500}
+                  disabled={adjustmentPending}
+                  placeholder="Explica el conteo o corrección realizada"
+                  onChange={(event) => setAdjustmentReason(event.target.value)}
+                />
+              </Field>
+              {adjustmentError && (
+                <p className="text-sm text-destructive" role="alert">
+                  {adjustmentError}
+                  {adjustmentUncertain
+                    ? " Conserva esta operación y reconcilia antes de repetirla."
+                    : ""}
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setAdjusting(null)}
+              disabled={adjustmentPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => void submitAdjustment()}
+              disabled={adjustmentPending}
+              className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0"
+            >
+              {adjustmentPending ? "Confirmando…" : "Confirmar ajuste"}
             </Button>
           </DialogFooter>
         </DialogContent>

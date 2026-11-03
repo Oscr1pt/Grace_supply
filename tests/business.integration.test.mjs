@@ -1130,6 +1130,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
     const posted = await actor.rpc("adjust_inventory", { p_request: request });
     assert.ifError(posted.error);
     assert.equal(posted.data.quantity, before.data.quantity + 2);
+    assert.equal(posted.data.reason, request.reason);
     const replay = await actor.rpc("adjust_inventory", { p_request: request });
     assert.ifError(replay.error);
     assert.deepEqual(replay.data, posted.data);
@@ -1189,6 +1190,12 @@ const integration = test.describe("local atomic financial operations", { skip: !
 
   test("posted operations create an immutable audit event attributed to the Auth actor", async () => {
     const actor = await signedIn(admin);
+    const auditBefore = await service
+      .from("inventory")
+      .select("quantity")
+      .eq("id", itemId)
+      .single();
+    assert.ifError(auditBefore.error);
     const result = await actor.rpc("adjust_inventory", {
       p_request: {
         idempotency_key: crypto.randomUUID(),
@@ -1210,6 +1217,10 @@ const integration = test.describe("local atomic financial operations", { skip: !
     assert.equal(event.data.event_type, "inventory_adjustment");
     assert.equal(event.data.entity_type, "inventory");
     assert.equal(event.data.entity_id, itemId);
+    assert.equal(event.data.details.reason, "Synthetic CHG-08 audit fixture");
+    assert.equal(String(event.data.details.delta), "1");
+    assert.equal(String(event.data.details.previous_quantity), String(auditBefore.data.quantity));
+    assert.equal(String(event.data.details.quantity), String(auditBefore.data.quantity + 1));
     assert.ok(Number.isFinite(Date.parse(event.data.occurred_at)));
     assert.ok(Date.parse(event.data.occurred_at) > Date.parse("2026-10-01T00:00:00Z"));
     assert.equal(JSON.stringify(event.data.details).match(/password|token|secret/i), null);

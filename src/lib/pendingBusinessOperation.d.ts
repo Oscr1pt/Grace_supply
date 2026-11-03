@@ -1,6 +1,6 @@
 export type PendingBusinessOperation = {
   actorId: string;
-  type: "sale" | "purchase" | "expense" | "financial_annulment";
+  type: "sale" | "purchase" | "expense" | "financial_annulment" | "inventory_adjustment";
   idempotencyKey: string;
   request: Record<string, unknown>;
   context?: unknown;
