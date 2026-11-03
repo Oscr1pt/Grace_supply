@@ -37,6 +37,7 @@ export type Role = "admin" | "employee";
 export type User = {
   username: string;
   name: string;
+  phone: string | null;
   role: Role;
   permissions: Permission[];
   active: boolean;
@@ -65,8 +66,17 @@ type AuthCtx = {
   isAdmin: boolean;
   updateEmployee: (
     username: string,
-    patch: { name?: string; role?: Role; permissions?: Permission[] },
+    patch: { name?: string; phone?: string | null; role?: Role; permissions?: Permission[] },
   ) => Promise<void>;
+  createEmployee: (input: {
+    username: string;
+    name: string;
+    email: string;
+    phone: string;
+    role: Role;
+    initialPassword: string;
+    confirmAdminCreation?: boolean;
+  }) => Promise<void>;
   removeEmployee: (username: string) => Promise<void>;
   inviteEmployee: (input: { username: string; name: string; email: string }) => Promise<void>;
   activateEmployee: (username: string) => Promise<void>;
@@ -79,6 +89,7 @@ const AUTH_UNAVAILABLE = "No se pudo verificar la sesión. Intenta de nuevo.";
 type ProfileRow = {
   username: string;
   name: string;
+  phone: string | null;
   role: Role;
   permissions: string[];
   active: boolean;
@@ -92,6 +103,7 @@ function toPublic(row: ProfileRow, authUserId?: string): User {
   return {
     username: row.username,
     name: row.name,
+    phone: row.phone ?? null,
     role,
     permissions: role === "admin" ? ALL_PERMISSIONS : permissions,
     active: row.active,
@@ -128,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data, error } = await supabase
       .from("user_profiles")
-      .select("username, name, role, permissions, active")
+      .select("username, name, phone, role, permissions, active")
       .eq("auth_user_id", authResult.user.id as UUID)
       .maybeSingle();
     if (error || !data?.active) return null;
@@ -141,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsersError(null);
     const { data, error } = await supabase
       .from("user_profiles")
-      .select("username, name, role, permissions, active")
+      .select("username, name, phone, role, permissions, active")
       .order("username");
     if (error) {
       if (revision !== authRevision.current) return;
@@ -434,16 +446,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [announceInvalidation]);
 
   const updateEmployee = useCallback(
-    async (username: string, patch: { name?: string; role?: Role; permissions?: Permission[] }) => {
+    async (
+      username: string,
+      patch: { name?: string; phone?: string | null; role?: Role; permissions?: Permission[] },
+    ) => {
       const { data, error } = await supabase.functions.invoke<{ profile: ProfileRow }>(
         "manage-profile",
         {
-          body: { action: "update", username, ...patch },
+          body: {
+            action: "update",
+            username,
+            ...patch,
+            ...(patch.role === "admin" ? { confirm_admin_role: true } : {}),
+          },
         },
       );
       if (error) throw new Error(employeeActionErrorMessage(error, "update"));
       requireConfirmedEmployeeProfile(data, username, {
         ...(patch.name ? { name: patch.name.trim() } : {}),
+        ...(Object.hasOwn(patch, "phone") ? { phone: patch.phone } : {}),
         ...(patch.role ? { role: patch.role } : {}),
         ...(patch.permissions ? { permissions: patch.permissions } : {}),
       });
@@ -452,6 +473,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (username === user?.username) await revalidateSession(true);
     },
     [announceInvalidation, refreshUsers, revalidateSession, user?.username],
+  );
+
+  const createEmployee = useCallback(
+    async (input: {
+      username: string;
+      name: string;
+      email: string;
+      phone: string;
+      role: Role;
+      initialPassword: string;
+      confirmAdminCreation?: boolean;
+    }) => {
+      const { data, error } = await supabase.functions.invoke<{ profile: ProfileRow }>(
+        "manage-profile",
+        {
+          body: {
+            action: "create_user",
+            username: input.username,
+            name: input.name,
+            email: input.email,
+            phone: input.phone,
+            role: input.role,
+            initial_password: input.initialPassword,
+            ...(input.confirmAdminCreation ? { confirm_admin_creation: true } : {}),
+          },
+        },
+      );
+      if (error) throw new Error(employeeActionErrorMessage(error, "create"));
+      requireConfirmedEmployeeProfile(data, input.username, {
+        active: false,
+        name: input.name,
+        phone: input.phone,
+        role: input.role,
+      });
+      await refreshUsers();
+      announceInvalidation();
+    },
+    [announceInvalidation, refreshUsers],
   );
 
   const removeEmployee = useCallback(
@@ -547,6 +606,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         can,
         isAdmin,
         updateEmployee,
+        createEmployee,
         removeEmployee,
         inviteEmployee,
         activateEmployee,

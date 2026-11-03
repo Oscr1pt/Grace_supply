@@ -12,18 +12,34 @@ export type EmployeeInvitation = {
   email: string;
 };
 
+export type EmployeeCreation = EmployeeInvitation & {
+  phone: string;
+  role: Role;
+  initialPassword: string;
+  confirmPassword: string;
+};
+
 export type EmployeeInvitationErrors = Partial<Record<keyof EmployeeInvitation, string>>;
 
 export function getEmployeeAccountStatus(active: unknown): EmployeeAccountStatus;
 export function validateEmployeeInvitation(
   input: Partial<EmployeeInvitation>,
 ): EmployeeInvitationErrors;
+export function validateEmployeeCreation(
+  input: Partial<EmployeeCreation>,
+): Partial<Record<keyof EmployeeCreation, string>>;
 export function requireConfirmedEmployeeProfile<T = Record<string, unknown>>(
   result: unknown,
   username: string,
-  expected?: { active?: boolean; name?: string; role?: Role; permissions?: Permission[] },
+  expected?: {
+    active?: boolean;
+    name?: string;
+    phone?: string | null;
+    role?: Role;
+    permissions?: Permission[];
+  },
 ): T;
 export function employeeActionErrorMessage(
   error: unknown,
-  action: "invite" | "activate" | "update" | "revoke",
+  action: "create" | "invite" | "activate" | "update" | "revoke",
 ): string;

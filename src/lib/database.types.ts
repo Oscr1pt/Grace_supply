@@ -273,9 +273,11 @@ export type Database = {
           username: string;
           normalized_username: string;
           name: string;
+          phone: string | null;
           role: "admin" | "employee";
           permissions: string[];
           active: boolean;
+          password_change_required: boolean;
         },
         "auth_user_id" | "username" | "name",
         [FK<"user_profiles_auth_user_id_fkey", "auth_user_id", "users", "id", true>],

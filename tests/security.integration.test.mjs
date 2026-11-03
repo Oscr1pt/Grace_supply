@@ -133,6 +133,7 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
         auth_user_id: created.data.user.id,
         username: identities[item.key].username,
         name: `Synthetic ${item.key}`,
+        phone: "+1 809 555 0112",
         role: item.role,
         permissions: item.permissions,
         active: true,
@@ -387,17 +388,26 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
     const client = await signedIn(identities.clients);
     const ownProfile = await client
       .from("user_profiles")
-      .select("auth_user_id,username,role,permissions,active")
+      .select("auth_user_id,username,role,permissions,active,phone")
       .eq("auth_user_id", identities.clients.id)
       .single();
     assert.ifError(ownProfile.error);
     assert.equal(ownProfile.data.auth_user_id, identities.clients.id);
+    assert.equal(ownProfile.data.phone, "+1 809 555 0112");
     const otherProfile = await client
       .from("user_profiles")
-      .select("username")
+      .select("username,phone")
       .eq("auth_user_id", identities.sales.id);
     assert.ifError(otherProfile.error);
     assert.deepEqual(otherProfile.data, []);
+    const admin = await signedIn(identities.admin);
+    const authorizedPhone = await admin
+      .from("user_profiles")
+      .select("phone")
+      .eq("auth_user_id", identities.clients.id)
+      .single();
+    assert.ifError(authorizedPhone.error);
+    assert.equal(authorizedPhone.data.phone, "+1 809 555 0112");
 
     const created = await client
       .from("clients")
@@ -1258,6 +1268,246 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
       200,
       "the invited employee can log in only after the official link confirms email and password",
     );
+  });
+
+  test("administrative account creation requires verified identity and server-enforced initial password change", async () => {
+    const admin = await signedIn(identities.admin);
+    const { data: adminSession } = await admin.auth.getSession();
+    const invoke = (token, payload) =>
+      fetch(`${url}/functions/v1/manage-profile`, {
+        method: "POST",
+        headers: {
+          apikey: anonKey,
+          authorization: token ? `Bearer ${token}` : "",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+    const username = `chg22-${suffix}`;
+    const email = `chg22-${suffix}@example.test`;
+    const initialPassword = `Initial-${crypto.randomUUID()}-8a!`;
+    const created = await invoke(adminSession.session.access_token, {
+      action: "create_user",
+      username,
+      name: "Synthetic CHG-22 employee",
+      email,
+      phone: "+1 (809) 555-0182",
+      role: "employee",
+      initial_password: initialPassword,
+    });
+    const creationResult = await created.json();
+    assert.equal(
+      created.status,
+      202,
+      JSON.stringify({
+        status: created.status,
+        error: creationResult.error ?? creationResult.message ?? creationResult.code ?? null,
+      }),
+    );
+    assert.equal(creationResult.profile.active, false);
+    assert.equal(creationResult.profile.role, "employee");
+    assert.equal(creationResult.profile.phone, "+1 (809) 555-0182");
+    assert.equal(JSON.stringify(creationResult).includes(initialPassword), false);
+    assert.equal(JSON.stringify(creationResult).includes(email), false);
+    const profile = await service
+      .from("user_profiles")
+      .select("auth_user_id,username,phone,role,active,password_change_required")
+      .eq("normalized_username", username)
+      .single();
+    assert.ifError(profile.error);
+    assert.equal(profile.data.password_change_required, true);
+    identities.chg22Created = { id: profile.data.auth_user_id, email, username };
+    provisioningIdentityIds.push(profile.data.auth_user_id);
+
+    const activateBeforeSetup = await invoke(adminSession.session.access_token, {
+      action: "activate",
+      username,
+    });
+    assert.equal(activateBeforeSetup.status, 409);
+    const invalidPhone = await invoke(adminSession.session.access_token, {
+      action: "create_user",
+      username: `badphone-${suffix}`,
+      name: "Synthetic invalid phone",
+      email: `badphone-${suffix}@example.test`,
+      phone: "1234",
+      role: "employee",
+      initial_password: initialPassword,
+    });
+    assert.equal(invalidPhone.status, 400);
+    const duplicateUsername = await invoke(adminSession.session.access_token, {
+      action: "create_user",
+      username,
+      name: "Synthetic duplicate",
+      email: `duplicate-${suffix}@example.test`,
+      phone: "+1 809 555 0182",
+      role: "employee",
+      initial_password: initialPassword,
+    });
+    assert.equal(duplicateUsername.status, 409);
+    const duplicateEmail = await invoke(adminSession.session.access_token, {
+      action: "create_user",
+      username: `dupemail-${suffix}`,
+      name: "Synthetic duplicate email",
+      email,
+      phone: "+1 809 555 0183",
+      role: "employee",
+      initial_password: initialPassword,
+    });
+    assert.equal(duplicateEmail.status, 409);
+    const duplicateEmailProfile = await service
+      .from("user_profiles")
+      .select("auth_user_id")
+      .eq("normalized_username", `dupemail-${suffix}`)
+      .maybeSingle();
+    assert.ifError(duplicateEmailProfile.error);
+    assert.equal(duplicateEmailProfile.data, null);
+    const originalIdentity = await service.auth.admin.getUserById(profile.data.auth_user_id);
+    assert.ifError(originalIdentity.error);
+    assert.equal(originalIdentity.data.user.email?.toLowerCase(), email.toLowerCase());
+    const duplicateEmailIncident = await service
+      .from("provisioning_incidents")
+      .select("id")
+      .eq("username", `dupemail-${suffix}`)
+      .maybeSingle();
+    assert.ifError(duplicateEmailIncident.error);
+    assert.equal(duplicateEmailIncident.data, null);
+
+    const employee = await signedIn(identities.clients);
+    const { data: employeeSession } = await employee.auth.getSession();
+    const employeeCreate = await invoke(employeeSession.session.access_token, {
+      action: "create_user",
+      username: `employee-create-${suffix}`,
+      name: "Synthetic denied create",
+      email: `employee-create-${suffix}@example.test`,
+      phone: "+1 809 555 0184",
+      role: "employee",
+      initial_password: initialPassword,
+    });
+    assert.equal(employeeCreate.status, 403);
+    const anonymousCreate = await invoke(null, {
+      action: "create_user",
+      username: `anonymous-create-${suffix}`,
+      name: "Synthetic denied create",
+      email: `anonymous-create-${suffix}@example.test`,
+      phone: "+1 809 555 0185",
+      role: "employee",
+      initial_password: initialPassword,
+    });
+    assert.equal(anonymousCreate.status, 401);
+
+    const unconfirmedAdmin = await invoke(adminSession.session.access_token, {
+      action: "create_user",
+      username: `chg22-admin-${suffix}`,
+      name: "Synthetic administrator",
+      email: `chg22-admin-${suffix}@example.test`,
+      phone: "+1 809 555 0186",
+      role: "admin",
+      initial_password: initialPassword,
+    });
+    assert.equal(unconfirmedAdmin.status, 409);
+    const createdAdmin = await invoke(adminSession.session.access_token, {
+      action: "create_user",
+      username: `chg22-admin-${suffix}`,
+      name: "Synthetic administrator",
+      email: `chg22-admin-${suffix}@example.test`,
+      phone: "+1 809 555 0186",
+      role: "admin",
+      confirm_admin_creation: true,
+      initial_password: initialPassword,
+    });
+    assert.equal(createdAdmin.status, 202);
+    const createdAdminBody = await createdAdmin.json();
+    assert.equal(createdAdminBody.profile.role, "admin");
+    assert.equal(createdAdminBody.profile.active, false);
+    const adminProfile = await service
+      .from("user_profiles")
+      .select("auth_user_id,role,active,password_change_required")
+      .eq("normalized_username", `chg22-admin-${suffix}`)
+      .single();
+    assert.ifError(adminProfile.error);
+    assert.deepEqual(
+      {
+        role: adminProfile.data.role,
+        active: adminProfile.data.active,
+        password_change_required: adminProfile.data.password_change_required,
+      },
+      { role: "admin", active: false, password_change_required: true },
+    );
+    provisioningIdentityIds.push(adminProfile.data.auth_user_id);
+
+    const inbox = await fetch(`${mailpitUrl}/api/v1/messages`);
+    assert.equal(inbox.ok, true);
+    const { messages = [] } = await inbox.json();
+    const invitationMessage = messages.find((message) =>
+      JSON.stringify(message).toLowerCase().includes(email.toLowerCase()),
+    );
+    assert.ok(invitationMessage);
+    const messageId = invitationMessage.ID ?? invitationMessage.Id ?? invitationMessage.id;
+    const detail = await fetch(`${mailpitUrl}/api/v1/message/${encodeURIComponent(messageId)}`);
+    assert.equal(detail.status, 200);
+    const invitationLink = authLinkFromMailpit(await detail.json(), "invite");
+    assert.ok(invitationLink);
+    assert.match(invitationLink.searchParams.get("redirect_to") ?? "", /setup-account/);
+    const invitedAuth = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const accepted = await invitedAuth.auth.verifyOtp({
+      token_hash: invitationLink.searchParams.get("token"),
+      type: "invite",
+    });
+    assert.equal(
+      accepted.error?.code,
+      undefined,
+      JSON.stringify({
+        status: accepted.error?.status ?? null,
+        code: accepted.error?.code ?? null,
+      }),
+    );
+    assert.ifError(accepted.error);
+    assert.equal(accepted.data.user.id, profile.data.auth_user_id);
+    const activateAfterVerifyBeforeRotation = await invoke(adminSession.session.access_token, {
+      action: "activate",
+      username,
+    });
+    assert.equal(activateAfterVerifyBeforeRotation.status, 409);
+
+    const replacementPassword = `Changed-${crypto.randomUUID()}-9b!`;
+    const completeSetup = await fetch(`${url}/functions/v1/complete-initial-password`, {
+      method: "POST",
+      headers: {
+        apikey: anonKey,
+        authorization: `Bearer ${accepted.data.session.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ password: replacementPassword }),
+    });
+    assert.equal(completeSetup.status, 200);
+    assert.deepEqual(await completeSetup.json(), { completed: true });
+    const afterSetup = await service
+      .from("user_profiles")
+      .select("active,password_change_required")
+      .eq("auth_user_id", profile.data.auth_user_id)
+      .single();
+    assert.ifError(afterSetup.error);
+    assert.deepEqual(afterSetup.data, { active: false, password_change_required: false });
+    const activateAfterRotation = await invoke(adminSession.session.access_token, {
+      action: "activate",
+      username,
+    });
+    assert.equal(activateAfterRotation.status, 200);
+    assert.equal((await activateAfterRotation.json()).profile.active, true);
+    const oldPasswordLogin = await fetch(`${url}/functions/v1/username-login`, {
+      method: "POST",
+      headers: { apikey: anonKey, "content-type": "application/json" },
+      body: JSON.stringify({ username, password: initialPassword }),
+    });
+    assert.equal(oldPasswordLogin.status, 401);
+    const newPasswordLogin = await fetch(`${url}/functions/v1/username-login`, {
+      method: "POST",
+      headers: { apikey: anonKey, "content-type": "application/json" },
+      body: JSON.stringify({ username, password: replacementPassword }),
+    });
+    assert.equal(newPasswordLogin.status, 200);
   });
 
   test("profile persistence failure compensates Auth; failed compensation is recorded, blocks activation and is administratively recoverable", async () => {

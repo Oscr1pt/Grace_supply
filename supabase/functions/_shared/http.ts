@@ -3,6 +3,8 @@ const localOrigins = new Set([
   "http://127.0.0.1:3000",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5174",
 ]);
 
 export function corsHeaders(request: Request): Record<string, string> {
@@ -15,7 +17,7 @@ export function corsHeaders(request: Request): Record<string, string> {
   const headers: Record<string, string> = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Vary": "Origin",
+    Vary: "Origin",
   };
   if (allowed.has(origin)) headers["Access-Control-Allow-Origin"] = origin;
   return headers;

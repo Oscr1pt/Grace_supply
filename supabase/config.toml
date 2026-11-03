@@ -171,6 +171,10 @@ additional_redirect_urls = [
   "http://127.0.0.1:8080/reset-password",
   "http://localhost:5174/reset-password",
   "http://127.0.0.1:5174/reset-password",
+  "http://localhost:3000/setup-account",
+  "http://127.0.0.1:3000/setup-account",
+  "http://localhost:5174/setup-account",
+  "http://127.0.0.1:5174/setup-account",
 ]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
@@ -280,6 +284,9 @@ max_frequency = "5s"
 verify_jwt = false
 
 [functions.manage-profile]
+verify_jwt = true
+
+[functions.complete-initial-password]
 verify_jwt = true
 
 [functions.username-recovery]

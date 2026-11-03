@@ -1,5 +1,6 @@
 const USERNAME_PATTERN = /^[a-z0-9._-]{3,64}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_PATTERN = /^[+\d\s().-]+$/;
 
 /** @param {unknown} active */
 export function getEmployeeAccountStatus(active) {
@@ -30,7 +31,35 @@ export function validateEmployeeInvitation(input) {
   return errors;
 }
 
-/** @param {unknown} result @param {string} username @param {{active?: boolean, name?: string, role?: string, permissions?: string[]}} [expected] */
+/** @param {{ username?: unknown, name?: unknown, email?: unknown, phone?: unknown, role?: unknown, initialPassword?: unknown, confirmPassword?: unknown }} input */
+export function validateEmployeeCreation(input) {
+  const errors = validateEmployeeInvitation(input);
+  const phone = typeof input.phone === "string" ? input.phone.trim() : "";
+  const initialPassword = typeof input.initialPassword === "string" ? input.initialPassword : "";
+  const confirmPassword = typeof input.confirmPassword === "string" ? input.confirmPassword : "";
+
+  if (!phone) errors.phone = "Escribe el teléfono de la persona.";
+  else if (
+    !PHONE_PATTERN.test(phone) ||
+    (phone.match(/\d/g) ?? []).length < 7 ||
+    (phone.match(/\d/g) ?? []).length > 15 ||
+    phone.length > 30
+  ) {
+    errors.phone = "Escribe un teléfono válido con entre 7 y 15 dígitos.";
+  }
+  if (input.role !== "admin" && input.role !== "employee") {
+    errors.role = "Selecciona un rol válido.";
+  }
+  if (initialPassword.length < 12) {
+    errors.initialPassword = "La contraseña inicial debe tener al menos 12 caracteres.";
+  }
+  if (initialPassword !== confirmPassword) {
+    errors.confirmPassword = "Las contraseñas no coinciden.";
+  }
+  return errors;
+}
+
+/** @param {unknown} result @param {string} username @param {{active?: boolean, name?: string, phone?: string | null, role?: string, permissions?: string[]}} [expected] */
 export function requireConfirmedEmployeeProfile(result, username, expected = {}) {
   const profile =
     result && typeof result === "object" && "profile" in result ? result.profile : null;
@@ -55,6 +84,11 @@ export function requireConfirmedEmployeeProfile(result, username, expected = {})
   if (expected.name && profile.name !== expected.name) {
     throw new Error(
       "El servidor no confirmó el nombre solicitado. Actualiza la lista antes de repetir.",
+    );
+  }
+  if (Object.hasOwn(expected, "phone") && profile.phone !== expected.phone) {
+    throw new Error(
+      "El servidor no confirmó el teléfono solicitado. Actualiza la lista antes de repetir.",
     );
   }
   if (expected.role && profile.role !== expected.role) {
@@ -88,9 +122,13 @@ export function employeeActionErrorMessage(error, action) {
   if (status === 401) return "Tu sesión venció. Inicia sesión nuevamente.";
   if (status === 403) return "No tienes permiso para administrar esta cuenta.";
   if (status === 423) return "La cuenta requiere revisión administrativa antes de activarse.";
+  if (status === 503 && action === "create")
+    return "La creaciÃ³n de cuentas no estÃ¡ habilitada en este entorno.";
   if (status === 503 && action === "invite")
     return "Las invitaciones no están habilitadas en este entorno.";
   if (status === 409) {
+    if (action === "create")
+      return "No se pudo completar el alta. Verifica si la cuenta ya aparece en el listado antes de repetir.";
     if (action === "invite")
       return "No se pudo completar la invitación. Verifica el usuario y el estado de la cuenta.";
     if (action === "activate")

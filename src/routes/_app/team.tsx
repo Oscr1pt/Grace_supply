@@ -167,6 +167,13 @@ function TeamPage() {
         description="Administra los accesos. Los cambios sensibles requieren confirmación del servidor."
       />
 
+      <a
+        href="/team/new"
+        className="inline-flex min-h-10 items-center justify-center rounded-md bg-[#D4AF37] px-4 text-sm font-medium text-black hover:bg-[#E5C158] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        Crear usuario
+      </a>
+
       {employeeProvisioningEnabled ? (
         <form
           onSubmit={submitInvite}
@@ -386,6 +393,16 @@ function TeamPage() {
                 </div>
 
                 <div className="mt-4 border-t border-border pt-4">
+                  <EmployeeContactEditor
+                    employee={employee}
+                    disabled={Boolean(pendingAction)}
+                    onSave={(patch) =>
+                      runAction(`profile:${employee.username}`, async () => {
+                        await updateEmployee(employee.username, patch);
+                        toast.success("El servidor confirmó los datos del perfil.");
+                      })
+                    }
+                  />
                   {isAdmin ? (
                     <p className="text-xs text-muted-foreground">
                       Los administradores tienen acceso completo a todas las secciones.
@@ -448,5 +465,71 @@ function TeamPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+function EmployeeContactEditor({
+  employee,
+  disabled,
+  onSave,
+}: {
+  employee: User;
+  disabled: boolean;
+  onSave: (patch: { name: string; phone: string | null }) => Promise<boolean>;
+}) {
+  const [name, setName] = useState(employee.name);
+  const [phone, setPhone] = useState(employee.phone ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const unchanged = name === employee.name && phone === (employee.phone ?? "");
+
+  return (
+    <form
+      className="mb-4 grid gap-3 sm:grid-cols-2"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (disabled || unchanged) return;
+        if (!name.trim() || name.trim().length > 120) {
+          setError("Escribe un nombre de hasta 120 caracteres.");
+          return;
+        }
+        setError(null);
+        const saved = await onSave({ name: name.trim(), phone: phone.trim() || null });
+        if (!saved) setError("No se confirmó el cambio. Revisa el estado antes de repetir.");
+      }}
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor={`employee-name-${employee.username}`}>Nombre</Label>
+        <Input
+          id={`employee-name-${employee.username}`}
+          value={name}
+          maxLength={120}
+          disabled={disabled}
+          aria-invalid={Boolean(error)}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`employee-phone-${employee.username}`}>Teléfono</Label>
+        <Input
+          id={`employee-phone-${employee.username}`}
+          type="tel"
+          autoComplete="tel"
+          value={phone}
+          maxLength={30}
+          disabled={disabled}
+          onChange={(event) => setPhone(event.target.value)}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+        <Button type="submit" size="sm" variant="outline" disabled={disabled || unchanged}>
+          Guardar perfil
+        </Button>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+      </div>
+    </form>
   );
 }
