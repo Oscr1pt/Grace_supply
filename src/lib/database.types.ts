@@ -52,13 +52,16 @@ export type Database = {
           phone: string;
           phone_secondary: string | null;
           rnc: string | null;
+          rnc_normalized: string | null;
           province: string | null;
           city: string | null;
           address: string;
           notes: string;
           status: "activo" | "inactivo";
         },
-        "name"
+        "name",
+        [],
+        "rnc_normalized"
       >;
       suppliers: Table<
         TimestampRow & {

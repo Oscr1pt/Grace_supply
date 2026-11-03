@@ -4,7 +4,7 @@ export type Client = {
   email: string;
   phone: string;
   phoneSecondary?: string;
-  rnc?: string;
+  rnc?: string | null;
   province?: string;
   city?: string;
   address: string;

@@ -11,6 +11,14 @@ import {
   summarizeCredits,
   validatePartyForm,
 } from "../src/lib/creditWorkflows.js";
+import {
+  findClientDocumentDuplicate,
+  findClientNameContactMatches,
+  isValidCedula,
+  isValidRnc,
+  normalizeClientDocument,
+  validateClientForm,
+} from "../src/lib/clientIdentity.js";
 
 class MemoryStorage {
   values = new Map();
@@ -24,6 +32,52 @@ class MemoryStorage {
     this.values.delete(key);
   }
 }
+
+test("client identity validation normalizes Dominican documents without claiming official verification", () => {
+  assert.equal(normalizeClientDocument("001-1234567-8"), "00112345678");
+  assert.equal(normalizeClientDocument("1-01-12345-6"), "101123456");
+  assert.equal(isValidCedula("001-1234567-3"), true);
+  assert.equal(isValidCedula("001-1234567-4"), false);
+  assert.equal(isValidRnc("1-01-12345-1"), true);
+  assert.equal(isValidRnc("1-01-12345-2"), false);
+  assert.deepEqual(
+    validateClientForm({ name: "Cliente", email: "", phone: "", rnc: "texto libre" }),
+    {
+      rnc: "Escribe una cédula de 11 dígitos o un RNC de 9 dígitos válido; no verifica identidad oficial.",
+    },
+  );
+});
+
+test("client duplicate detection excludes the edited row and distinguishes homonyms", () => {
+  const clients = [
+    {
+      id: "one",
+      name: "Ana Pérez",
+      email: "ana@example.test",
+      phone: "809-555-0100",
+      rnc: "001-1234567-3",
+    },
+    { id: "two", name: "Ana Pérez", email: "ana2@example.test", phone: "809-555-0101", rnc: null },
+  ];
+  assert.equal(findClientDocumentDuplicate(clients, "00112345673", "one"), null);
+  assert.equal(findClientDocumentDuplicate(clients, "00112345673", "two")?.id, "one");
+  assert.equal(
+    findClientNameContactMatches(
+      clients,
+      { name: " Ana   Pérez ", email: "ana@example.test" },
+      "two",
+    ).length,
+    1,
+  );
+  assert.equal(
+    findClientNameContactMatches(
+      clients,
+      { name: "Ana Pérez", email: "different@example.test", phone: "809-555-0199" },
+      "two",
+    ).length,
+    0,
+  );
+});
 
 test("money inputs accept positive precision up to cents without rounding", () => {
   assert.equal(parseMoneyToCents("0.01"), 1);

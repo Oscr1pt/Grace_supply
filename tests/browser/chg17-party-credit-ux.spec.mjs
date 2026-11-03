@@ -1,6 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
+function uniqueValidCedula(seed) {
+  const body = String(seed).replace(/\D/g, "").padStart(10, "0").slice(-10);
+  const weights = [1, 2];
+  let sum = 0;
+  for (let index = 0; index < body.length; index += 1) {
+    const product = Number(body[index]) * weights[index % 2];
+    sum += product > 9 ? product - 9 : product;
+  }
+  return `${body}${(10 - (sum % 10)) % 10}`;
+}
+
 const enabled = process.env.CHG17_DISPOSABLE_TESTS === "1";
 const url = process.env.LOCAL_SUPABASE_URL;
 const anonKey = process.env.LOCAL_SUPABASE_ANON_KEY;
@@ -199,8 +210,14 @@ test.describe.serial("CHG-17 clients, suppliers and credit workflows", () => {
     await expect(
       clientDialog.getByText("Escribe un correo válido o deja este campo vacío."),
     ).toBeVisible();
+    await expect(
+      clientDialog.getByText(/cédula de 11 dígitos o un RNC de 9 dígitos/),
+    ).toBeVisible();
     await expect(clientDialog.getByLabel("Notas / Preferencias")).toHaveValue("nota ".repeat(600));
     await clientDialog.getByLabel("Correo electrónico").fill(`cliente-${suffix}@example.test`);
+    await clientDialog
+      .getByLabel("RNC / Cédula")
+      .fill(uniqueValidCedula(Number.parseInt(suffix, 16)));
     await clientDialog.getByRole("button", { name: "Agregar cliente" }).click();
     await expect(page.getByText("Cliente agregado")).toBeVisible();
     const client = await service.from("clients").select("id").eq("name", clientName).single();

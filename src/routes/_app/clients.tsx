@@ -65,9 +65,14 @@ import {
   persistPendingCreditPayment,
   readPendingCreditPayment,
   summarizeCredits,
-  validatePartyForm,
   type CreditPaymentOperation,
 } from "@/lib/creditWorkflows.js";
+import {
+  findClientDocumentDuplicate,
+  findClientNameContactMatches,
+  normalizeClientDocument,
+  validateClientForm,
+} from "@/lib/clientIdentity.js";
 
 export const Route = createFileRoute("/_app/clients")({
   component: ClientsPage,
@@ -115,7 +120,10 @@ function ClientsPage() {
   const [openForm, setOpenForm] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState(emptyClient);
-  const [formErrors, setFormErrors] = useState<Partial<Record<"name" | "email", string>>>({});
+  const [formErrors, setFormErrors] = useState<
+    Partial<Record<"name" | "email" | "phone" | "rnc", string>>
+  >({});
+  const [homonymConfirmed, setHomonymConfirmed] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "rejected">("idle");
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"todos" | "activo" | "inactivo">("todos");
@@ -176,6 +184,7 @@ function ClientsPage() {
     setEditing(null);
     setForm(emptyClient);
     setFormErrors({});
+    setHomonymConfirmed(false);
     setSaveState("idle");
     setOpenForm(true);
   };
@@ -184,13 +193,24 @@ function ClientsPage() {
     setEditing(c);
     setForm({ ...emptyClient, ...c });
     setFormErrors({});
+    setHomonymConfirmed(false);
     setSaveState("idle");
     setOpenForm(true);
   };
 
   const saveClient = async () => {
     if (pending || partySaveInFlight.current) return;
-    const errors = validatePartyForm(form);
+    const errors = validateClientForm(form);
+    const documentDuplicate = findClientDocumentDuplicate(clients, form.rnc, editing?.id);
+    const nameContactMatches = findClientNameContactMatches(clients, form, editing?.id);
+    if (documentDuplicate) {
+      errors.rnc =
+        "Este documento ya pertenece a otro cliente, incluso si está inactivo. Abre su ficha o usa otro documento.";
+    }
+    if (nameContactMatches.length > 0 && !homonymConfirmed) {
+      errors.name =
+        "Existe un cliente con el mismo nombre y contacto. Confirma que se trata de otra persona.";
+    }
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) {
       setSaveState("rejected");
@@ -201,17 +221,31 @@ function ClientsPage() {
     setSaveState("saving");
     try {
       if (editing) {
-        await update(editing.id, form);
+        await update(editing.id, {
+          ...form,
+          rnc: form.rnc ? normalizeClientDocument(form.rnc) : null,
+        });
         toast.success("Cliente actualizado");
       } else {
-        await insert({ id: uid(), createdAt: new Date().toISOString(), ...form });
+        await insert({
+          id: uid(),
+          createdAt: new Date().toISOString(),
+          ...form,
+          rnc: form.rnc ? normalizeClientDocument(form.rnc) : null,
+        });
         toast.success("Cliente agregado");
       }
       setOpenForm(false);
       setSaveState("saved");
     } catch (e) {
       setSaveState("rejected");
-      toast.error(userPersistenceMessage(e));
+      if (e instanceof PersistenceError && e.kind === "conflict") {
+        toast.error(
+          "Ese documento ya está registrado. Revisa la ficha existente antes de volver a intentarlo.",
+        );
+      } else {
+        toast.error(userPersistenceMessage(e));
+      }
     } finally {
       partySaveInFlight.current = false;
       setPending(false);
@@ -484,10 +518,16 @@ function ClientsPage() {
                 </Field>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="RNC / Cédula">
+                  <Field label="RNC / Cédula" error={formErrors.rnc} htmlFor="client-rnc">
                     <Input
+                      id="client-rnc"
+                      aria-invalid={Boolean(formErrors.rnc)}
+                      aria-describedby={formErrors.rnc ? "client-rnc-error" : "client-rnc-hint"}
                       value={form.rnc || ""}
-                      onChange={(e) => setForm({ ...form, rnc: e.target.value })}
+                      onChange={(e) => {
+                        setForm({ ...form, rnc: e.target.value });
+                        setFormErrors({ ...formErrors, rnc: undefined });
+                      }}
                       placeholder="Identificación (opcional)"
                     />
                   </Field>
@@ -524,11 +564,17 @@ function ClientsPage() {
                       placeholder="nombre@ejemplo.com"
                     />
                   </Field>
-                  <Field label="Teléfono Principal">
+                  <Field label="Teléfono Principal" error={formErrors.phone} htmlFor="client-phone">
                     <Input
+                      id="client-phone"
                       type="tel"
+                      aria-invalid={Boolean(formErrors.phone)}
+                      aria-describedby={formErrors.phone ? "client-phone-error" : undefined}
                       value={form.phone}
-                      onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                      onChange={(e) => {
+                        setForm({ ...form, phone: e.target.value });
+                        setFormErrors({ ...formErrors, phone: undefined });
+                      }}
                       placeholder="809-555-0100"
                     />
                   </Field>
@@ -566,6 +612,20 @@ function ClientsPage() {
                     placeholder="Cliente frecuente de ceras y bálsamos de barba, prefiere pedidos al por mayor"
                   />
                 </Field>
+                {findClientNameContactMatches(clients, form, editing?.id).length > 0 && (
+                  <label className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={homonymConfirmed}
+                      onChange={(event) => setHomonymConfirmed(event.target.checked)}
+                      aria-describedby="client-homonym-warning"
+                    />
+                    <span id="client-homonym-warning">
+                      Confirmo que es otra persona; el documento o los datos de contacto son
+                      diferentes.
+                    </span>
+                  </label>
+                )}
               </div>
               {saveState === "saving" && (
                 <p role="status" className="text-sm text-muted-foreground">
