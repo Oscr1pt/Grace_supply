@@ -86,6 +86,13 @@ const Ctx = createContext<AuthCtx | null>(null);
 const INVALID_CREDENTIALS = "Usuario o contraseña inválidos";
 const AUTH_UNAVAILABLE = "No se pudo verificar la sesión. Intenta de nuevo.";
 
+class ProfileLoadError extends Error {
+  constructor() {
+    super(AUTH_UNAVAILABLE);
+    this.name = "ProfileLoadError";
+  }
+}
+
 type ProfileRow = {
   username: string;
   name: string;
@@ -129,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const currentIdentity = useRef<string | null>(null);
   const currentAuthorizationKey = useRef("anonymous");
   const authRevision = useRef(0);
+  const loginAttempt = useRef(0);
   const initializedAuth = useRef(false);
   const invalidationChannel = useRef<BroadcastChannel | null>(null);
   const passwordSetupIdentity = useRef<string | null>(null);
@@ -136,14 +144,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadCurrentProfile = useCallback(async () => {
     const { data: authResult, error: authError } = await supabase.auth.getUser();
-    if (authError || !authResult.user?.email_confirmed_at) return null;
+    if (authError) throw new ProfileLoadError();
+    if (!authResult.user?.email_confirmed_at) return null;
 
     const { data, error } = await supabase
       .from("user_profiles")
       .select("username, name, phone, role, permissions, active")
       .eq("auth_user_id", authResult.user.id as UUID)
       .maybeSingle();
-    if (error || !data?.active) return null;
+    if (error) throw new ProfileLoadError();
+    if (!data?.active) return null;
     return toPublic(data as ProfileRow, authResult.user.id);
   }, []);
 
@@ -196,7 +206,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const profile = await loadCurrentProfile();
+      let profile: User | null;
+      try {
+        profile = await loadCurrentProfile();
+      } catch {
+        if (revision === authRevision.current) setAuthReady(true);
+        return;
+      }
       if (revision !== authRevision.current) return;
       if (!profile) {
         const { data: currentSession } = await supabase.auth.getSession();
@@ -385,6 +401,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (username: string, password: string) => {
+      const attempt = ++loginAttempt.current;
       const { data, error } = await supabase.functions.invoke<{ session: Session }>(
         "username-login",
         {
@@ -404,10 +421,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refresh_token: data.session.refresh_token,
       });
       if (sessionError) throw new Error(AUTH_UNAVAILABLE);
-      const loginRevision = authRevision.current;
-      const profile = await loadCurrentProfile();
+      let profile: User | null;
+      try {
+        profile = await loadCurrentProfile();
+      } catch {
+        if (attempt === loginAttempt.current) await supabase.auth.signOut({ scope: "local" });
+        throw new Error(AUTH_UNAVAILABLE);
+      }
       const expectedIdentity = data.session.user?.id;
-      if (loginRevision !== authRevision.current) throw new Error(AUTH_UNAVAILABLE);
+      if (attempt !== loginAttempt.current) throw new Error(AUTH_UNAVAILABLE);
       if (!profile || (expectedIdentity && profile.authUserId !== expectedIdentity)) {
         const { data: currentSession } = await supabase.auth.getSession();
         if (expectedIdentity && currentSession.session?.user.id === expectedIdentity) {
@@ -432,6 +454,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    loginAttempt.current += 1;
     authRevision.current += 1;
     clearLegacyLocalSessionAndDataCache();
     currentIdentity.current = null;
