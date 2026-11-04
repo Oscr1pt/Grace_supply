@@ -42,6 +42,7 @@ import {
 } from "@/lib/catalog.js";
 import { persistenceFailure } from "@/lib/persistence.js";
 import { validateInventoryAdjustment } from "@/lib/inventoryAdjustment.js";
+import { createInitialInventoryRequest, validateInitialInventory } from "@/lib/initialInventory.js";
 import { postBusinessOperation } from "@/lib/businessOperations";
 import {
   clearPendingBusinessOperation,
@@ -108,8 +109,14 @@ function InventoryPage() {
   const [attributesText, setAttributesText] = useState("{}");
   const [costPriceText, setCostPriceText] = useState("0");
   const [priceText, setPriceText] = useState("0");
+  const [initialQuantityText, setInitialQuantityText] = useState("0");
   const [fieldErrors, setFieldErrors] = useState<
-    Partial<Record<"sku" | "name" | "category" | "costPrice" | "price" | "attributes", string>>
+    Partial<
+      Record<
+        "sku" | "name" | "category" | "costPrice" | "price" | "attributes" | "initialQuantity",
+        string
+      >
+    >
   >({});
   const [q, setQ] = useState("");
   const [barcodeItem, setBarcodeItem] = useState<InventoryItem | null>(null);
@@ -122,6 +129,8 @@ function InventoryPage() {
   const [adjustmentError, setAdjustmentError] = useState<string | null>(null);
   const [adjustmentPending, setAdjustmentPending] = useState(false);
   const [adjustmentUncertain, setAdjustmentUncertain] = useState(false);
+  const [initialProductId, setInitialProductId] = useState<string | null>(null);
+  const [initialOperationKey, setInitialOperationKey] = useState<string | null>(null);
   const categories = getCatalogCategories(items);
 
   const startNew = () => {
@@ -130,6 +139,9 @@ function InventoryPage() {
     setAttributesText("{}");
     setCostPriceText("0");
     setPriceText("0");
+    setInitialQuantityText("0");
+    setInitialProductId(null);
+    setInitialOperationKey(null);
     setFieldErrors({});
     setOpen(true);
   };
@@ -147,6 +159,9 @@ function InventoryPage() {
     setAttributesText(JSON.stringify(i.attributes ?? {}, null, 2));
     setCostPriceText(String(i.costPrice));
     setPriceText(String(i.price));
+    setInitialQuantityText("0");
+    setInitialProductId(null);
+    setInitialOperationKey(null);
     setFieldErrors({});
     setOpen(true);
   };
@@ -171,6 +186,9 @@ function InventoryPage() {
       nextErrors.costPrice = "Usa un importe igual o mayor que cero, con hasta 2 decimales.";
     if (isAdmin && price === null)
       nextErrors.price = "Usa un importe igual o mayor que cero, con hasta 2 decimales.";
+    const initialValidation = editing ? null : validateInitialInventory(initialQuantityText);
+    if (!editing && initialValidation && !initialValidation.ok)
+      nextErrors.initialQuantity = initialValidation.error;
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       toast.error("Revisa los campos marcados antes de guardar.");
@@ -197,8 +215,16 @@ function InventoryPage() {
     }
     setPending(true);
     try {
+      const productId = initialProductId ?? uid();
+      const operationKey = initialOperationKey ?? globalThis.crypto.randomUUID();
+      if (!editing) {
+        setInitialProductId(productId);
+        setInitialOperationKey(operationKey);
+      }
       const catalogItem = {
         ...form,
+        id: productId,
+        quantity: 0,
         sku: form.sku.trim(),
         name: form.name.trim(),
         category: resolveCatalogCategory(form.category, categories),
@@ -215,7 +241,35 @@ function InventoryPage() {
         await updateItem(editing.id, metadataAndPrice);
         toast.success("Producto actualizado");
       } else {
-        await insertItem({ id: uid(), createdAt: new Date().toISOString(), ...catalogItem });
+        if (!initialProductId) {
+          await insertItem({ createdAt: new Date().toISOString(), ...catalogItem });
+        }
+        const initialQuantity = initialValidation?.ok ? initialValidation.quantity : 0;
+        if (initialQuantity > 0) {
+          const storage = typeof window === "undefined" ? null : window.sessionStorage;
+          const pendingOperation =
+            storage && scopeKey ? readPendingBusinessOperation(storage, scopeKey) : null;
+          const request =
+            pendingOperation?.type === "inventory_adjustment" &&
+            pendingOperation.request.item_id === productId
+              ? (pendingOperation.request as ReturnType<typeof createInitialInventoryRequest>)
+              : createInitialInventoryRequest(productId, initialQuantity, scopeKey, operationKey);
+          if (storage && scopeKey) {
+            persistPendingBusinessOperation(storage, scopeKey, {
+              type: "inventory_adjustment",
+              idempotencyKey: String(request.idempotency_key),
+              request,
+            });
+          }
+          const confirmed = await postBusinessOperation("inventory_adjustment", request);
+          if (Number(confirmed.quantity) !== initialQuantity) {
+            throw new Error("La existencia inicial no pudo confirmarse con PostgreSQL.");
+          }
+          if (storage && scopeKey)
+            clearPendingBusinessOperation(storage, scopeKey, String(request.idempotency_key));
+        }
+        setInitialProductId(null);
+        setInitialOperationKey(null);
         toast.success("Producto agregado");
       }
       setOpen(false);
@@ -562,14 +616,51 @@ function InventoryPage() {
                       </p>
                     )}
                   </Field>
-                  <Field label="Existencia (Stock)">
-                    <Input
-                      type="number"
-                      value={form.quantity}
-                      disabled
-                      aria-describedby="stock-operation-note"
-                    />
-                  </Field>
+                  {editing ? (
+                    <Field label="Existencia (Stock)">
+                      <Input
+                        type="number"
+                        value={form.quantity}
+                        disabled
+                        aria-describedby="stock-operation-note"
+                      />
+                    </Field>
+                  ) : (
+                    <Field label="Existencia inicial (opcional)">
+                      <Input
+                        data-testid="catalog-initial-quantity"
+                        type="text"
+                        inputMode="numeric"
+                        value={initialQuantityText}
+                        disabled={pending}
+                        aria-invalid={Boolean(fieldErrors.initialQuantity)}
+                        aria-describedby={
+                          fieldErrors.initialQuantity
+                            ? "catalog-initial-quantity-error catalog-initial-quantity-help"
+                            : "catalog-initial-quantity-help"
+                        }
+                        onChange={(event) => {
+                          setInitialQuantityText(event.target.value);
+                          setFieldErrors((current) => ({ ...current, initialQuantity: undefined }));
+                        }}
+                      />
+                      <p
+                        id="catalog-initial-quantity-help"
+                        className="text-xs text-muted-foreground"
+                      >
+                        Se crea primero en cero y luego se confirma mediante un ajuste auditado.
+                      </p>
+                      {fieldErrors.initialQuantity && (
+                        <p
+                          id="catalog-initial-quantity-error"
+                          className="text-sm text-destructive"
+                          role="alert"
+                        >
+                          {fieldErrors.initialQuantity}
+                        </p>
+                      )}
+                    </Field>
+                  )}
                 </div>
                 <p id="stock-operation-note" className="text-xs text-muted-foreground">
                   El stock se actualiza al registrar una compra o venta autorizada.
