@@ -19,6 +19,7 @@ import {
   normalizeClientDocument,
   validateClientForm,
 } from "../src/lib/clientIdentity.js";
+import { pickClientMutationFields } from "../src/lib/clientPayload.js";
 
 class MemoryStorage {
   values = new Map();
@@ -44,6 +45,12 @@ test("client identity validation normalizes Dominican documents without claiming
     validateClientForm({ name: "Cliente", email: "", phone: "", rnc: "texto libre" }),
     {
       rnc: "Escribe una cédula de 11 dígitos o un RNC de 9 dígitos válido; no verifica identidad oficial.",
+    },
+  );
+  assert.deepEqual(
+    validateClientForm({ name: "Nuevo", email: "", phone: "", rnc: "" }, { requireDocument: true }),
+    {
+      rnc: "Escribe una cédula o RNC válido para registrar un cliente nuevo.",
     },
   );
 });
@@ -75,7 +82,22 @@ test("client duplicate detection excludes the edited row and distinguishes homon
       { name: "Ana Pérez", email: "different@example.test", phone: "809-555-0199" },
       "two",
     ).length,
-    0,
+    1,
+  );
+});
+
+test("client mutation payload excludes generated and server-managed fields", () => {
+  assert.deepEqual(
+    pickClientMutationFields({
+      id: "client-1",
+      name: "Cliente",
+      rnc: "001-1234567-3",
+      rncNormalized: "00112345673",
+      createdAt: "server-time",
+      updatedAt: "server-time",
+      status: "activo",
+    }),
+    { id: "client-1", name: "Cliente", rnc: "001-1234567-3", status: "activo" },
   );
 });
 

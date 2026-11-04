@@ -148,6 +148,7 @@ function ClientsPage() {
   const [paymentRecoveryLoaded, setPaymentRecoveryLoaded] = useState(false);
   const partySaveInFlight = useRef(false);
   const partyActionInFlight = useRef(false);
+  const nameMatches = findClientNameContactMatches(clients, form, editing?.id);
 
   useEffect(() => {
     try {
@@ -200,16 +201,15 @@ function ClientsPage() {
 
   const saveClient = async () => {
     if (pending || partySaveInFlight.current) return;
-    const errors = validateClientForm(form);
+    const errors = validateClientForm(form, { requireDocument: !editing });
     const documentDuplicate = findClientDocumentDuplicate(clients, form.rnc, editing?.id);
-    const nameContactMatches = findClientNameContactMatches(clients, form, editing?.id);
     if (documentDuplicate) {
       errors.rnc =
         "Este documento ya pertenece a otro cliente, incluso si está inactivo. Abre su ficha o usa otro documento.";
     }
-    if (nameContactMatches.length > 0 && !homonymConfirmed) {
+    if (nameMatches.length > 0 && !homonymConfirmed) {
       errors.name =
-        "Existe un cliente con el mismo nombre y contacto. Confirma que se trata de otra persona.";
+        "Existe otro cliente con el mismo nombre. Revisa la coincidencia y confirma si es otra persona.";
     }
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) {
@@ -528,7 +528,11 @@ function ClientsPage() {
                         setForm({ ...form, rnc: e.target.value });
                         setFormErrors({ ...formErrors, rnc: undefined });
                       }}
-                      placeholder="Identificación (opcional)"
+                      placeholder={
+                        editing
+                          ? "Identificación (opcional para históricos)"
+                          : "Cédula o RNC requerido"
+                      }
                     />
                   </Field>
                   <Field label="Estado">
@@ -612,7 +616,7 @@ function ClientsPage() {
                     placeholder="Cliente frecuente de ceras y bálsamos de barba, prefiere pedidos al por mayor"
                   />
                 </Field>
-                {findClientNameContactMatches(clients, form, editing?.id).length > 0 && (
+                {nameMatches.length > 0 && (
                   <label className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
                     <input
                       type="checkbox"
@@ -620,9 +624,14 @@ function ClientsPage() {
                       onChange={(event) => setHomonymConfirmed(event.target.checked)}
                       aria-describedby="client-homonym-warning"
                     />
-                    <span id="client-homonym-warning">
-                      Confirmo que es otra persona; el documento o los datos de contacto son
-                      diferentes.
+                    <span id="client-homonym-warning" className="space-y-1">
+                      <span className="block">
+                        Coincidencias de nombre: {nameMatches.map((match) => match.name).join(", ")}
+                        .
+                      </span>
+                      <span className="block">
+                        Confirmo que es otra persona; el documento es diferente.
+                      </span>
                     </span>
                   </label>
                 )}

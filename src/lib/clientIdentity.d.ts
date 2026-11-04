@@ -8,6 +8,7 @@ export function normalizeClientName(value: unknown): string;
 export function normalizeContact(value: unknown): string;
 export function validateClientForm(
   form: Record<string, unknown>,
+  options?: { requireDocument?: boolean },
 ): Partial<Record<ClientIdentityError, string>>;
 export function findClientDocumentDuplicate<T extends { id: string; rnc?: string | null }>(
   clients: T[],

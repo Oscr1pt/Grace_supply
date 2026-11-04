@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, fromDb, toDb } from "./supabase";
 import { useAuth } from "./auth";
 import { createScopeRequestGuard } from "./sessionScope.js";
+import { pickClientMutationFields } from "./clientPayload.js";
 import type { Database, UUID } from "./database.types";
 import type { SaleLine } from "./types";
 import {
@@ -19,16 +20,23 @@ import {
 
 type DomainTable = keyof Database["public"]["Tables"];
 type DomainView = keyof Database["public"]["Views"];
-const serverTimestampTables = new Set<DomainTable>(["clients", "suppliers", "inventory", "expenses"]);
+const serverTimestampTables = new Set<DomainTable>([
+  "clients",
+  "suppliers",
+  "inventory",
+  "expenses",
+]);
 
 function toMutationDb(table: DomainTable, value: Record<string, unknown>) {
-  const row = toDb(value);
+  const row = toDb(table === "clients" ? pickClientMutationFields(value) : value);
   if (serverTimestampTables.has(table)) delete row.created_at;
   return row;
 }
 
 function toUpdateDb(table: DomainTable, value: Record<string, unknown>) {
-  const row = toMutationDb(table, value);
+  const row = toDb(
+    table === "clients" ? pickClientMutationFields(value, { includeId: false }) : value,
+  );
   delete row.id;
   return row;
 }
@@ -94,7 +102,7 @@ export function useSupabaseTable<T extends { id: string }>(
           saleLines.push(line);
           linesBySale.set(line.saleId, saleLines);
         }
-        parsed = parsed.map((row) => ({ ...row, lines: linesBySale.get(row.id) ?? [] } as T));
+        parsed = parsed.map((row) => ({ ...row, lines: linesBySale.get(row.id) ?? [] }) as T);
       }
       if (!isCurrent()) return;
       setData(parsed);
@@ -140,8 +148,17 @@ export function useSupabaseTable<T extends { id: string }>(
         if (table === "sales") {
           const { sale, lines } = withoutSaleLines(item);
           const persistedSale = await executeAndReconcile(
-          () => supabase.from("sales").insert(toMutationDb("sales", sale as Record<string, unknown>) as never).select("*"),
-            () => supabase.from("sales").select("*").eq("id", item.id as UUID).maybeSingle(),
+            () =>
+              supabase
+                .from("sales")
+                .insert(toMutationDb("sales", sale as Record<string, unknown>) as never)
+                .select("*"),
+            () =>
+              supabase
+                .from("sales")
+                .select("*")
+                .eq("id", item.id as UUID)
+                .maybeSingle(),
             { id: item.id },
           );
           if (lines.length > 0) {
@@ -152,16 +169,22 @@ export function useSupabaseTable<T extends { id: string }>(
             }));
             const lineIds = rows.map((line) => line.id);
             try {
-              const lineResponse = await supabase.from("sale_lines").insert(
-                rows.map((line) => toDb(line as unknown as Record<string, unknown>)) as never,
-              ).select("id");
+              const lineResponse = await supabase
+                .from("sale_lines")
+                .insert(
+                  rows.map((line) => toDb(line as unknown as Record<string, unknown>)) as never,
+                )
+                .select("id");
               await confirmRows(lineResponse, lines.length);
             } catch (error) {
               const failure = persistenceFailure(error, true);
               let confirmedLineIds: string[] = [];
               if (failure.kind === "uncertain" || failure.kind === "conflict") {
                 try {
-                  const read = await supabase.from("sale_lines").select("id").in("id", lineIds as UUID[]);
+                  const read = await supabase
+                    .from("sale_lines")
+                    .select("id")
+                    .in("id", lineIds as UUID[]);
                   confirmedLineIds = (await confirmRows(read, lines.length)).map((row) => row.id);
                 } catch {
                   // The original result remains uncertain; do not retry the line insert.
@@ -185,8 +208,17 @@ export function useSupabaseTable<T extends { id: string }>(
         }
 
         const persisted = await executeAndReconcile(
-          () => supabase.from(table).insert(toMutationDb(table, item as Record<string, unknown>) as never).select("*"),
-          () => supabase.from(table).select("*").eq("id", item.id as UUID).maybeSingle(),
+          () =>
+            supabase
+              .from(table)
+              .insert(toMutationDb(table, item as Record<string, unknown>) as never)
+              .select("*"),
+          () =>
+            supabase
+              .from(table)
+              .select("*")
+              .eq("id", item.id as UUID)
+              .maybeSingle(),
           { id: item.id },
         );
         const confirmed = fromDb<T>(persisted as Record<string, unknown>);
@@ -223,7 +255,11 @@ export function useSupabaseTable<T extends { id: string }>(
   const remove = useCallback(
     async (id: string) => {
       await serializeMutation(`${table}:${id}`, async () => {
-        const response = await supabase.from(table).delete().eq("id", id as UUID).select("id");
+        const response = await supabase
+          .from(table)
+          .delete()
+          .eq("id", id as UUID)
+          .select("id");
         await confirmMutation(response, { id });
         setData((prev) => {
           const next = prev.filter((x) => x.id !== id);
