@@ -5,6 +5,7 @@ export type PersistenceErrorKind =
   | "conflict"
   | "transport"
   | "uncertain"
+  | "outdated"
   | "service";
 
 export class PersistenceError extends Error {

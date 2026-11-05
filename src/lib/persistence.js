@@ -1,4 +1,4 @@
-/** @typedef {"denied" | "validation" | "not_found" | "conflict" | "transport" | "uncertain" | "service"} PersistenceErrorKind */
+/** @typedef {"denied" | "validation" | "not_found" | "conflict" | "transport" | "uncertain" | "outdated" | "service"} PersistenceErrorKind */
 
 export class PersistenceError extends Error {
   /** @param {PersistenceErrorKind} kind @param {string} message @param {string[]} [confirmedIds] */
@@ -21,6 +21,9 @@ export function persistenceFailure(reason, writeMayHaveReachedServer = false) {
 
   if (code === "42501" || status === 401 || status === 403) {
     return new PersistenceError("denied", "La operación no fue autorizada.");
+  }
+  if (["PGRST202", "PGRST204", "PGRST205", "42883", "42703", "42P01", "42809"].includes(code)) {
+    return new PersistenceError("outdated", "El servidor requiere una actualizaci\u00f3n antes de guardar estos ajustes.");
   }
   if (code === "PGRST116" || /0 rows/i.test("details" in error ? String(error.details) : "")) {
     return new PersistenceError("not_found", "No se encontró el registro para confirmar el cambio.");

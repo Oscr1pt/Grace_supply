@@ -116,7 +116,9 @@ export function useSettings() {
                 business_name: next.businessName,
                 business_address: next.businessAddress,
                 business_phone: next.businessPhone,
-                tax_rate: Number(next.taxRate),
+                // Grace Supply V1 supports one operational rate only. Keep the
+                // database as the authority, while never trusting a client-supplied rate.
+                tax_rate: 18,
                 tax_calculation_enabled: next.taxCalculationEnabled === true,
               },
             } as never,

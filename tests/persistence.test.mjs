@@ -19,8 +19,16 @@ test("rejects Supabase permission errors as denied", async () => {
   );
 });
 
+test("classifies missing backend objects as an outdated server", () => {
+  const missingRpc = persistenceFailure({ code: "PGRST202", message: "function is missing" });
+  const missingRelation = persistenceFailure({ code: "42P01", message: "relation missing" });
+  assert.equal(missingRpc.kind, "outdated");
+  assert.equal(missingRelation.kind, "outdated");
+  assert.match(missingRpc.message, /servidor requiere una actualizaci/iu);
+});
+
 test("keeps SQL failures distinct from network transport failures", () => {
-  const sql = persistenceFailure({ code: "42P01", message: "relation missing" });
+  const sql = persistenceFailure({ code: "55000", message: "transaction rejected" });
   const network = persistenceFailure(new TypeError("Failed to fetch"));
   assert.equal(sql.kind, "service");
   assert.equal(network.kind, "transport");

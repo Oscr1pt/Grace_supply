@@ -25,11 +25,12 @@ import { clearSettingsCache } from "@/lib/settings-cache.js";
 
 export const Route = createFileRoute("/_app/settings")({ component: SettingsPage });
 
-type SettingsForm = Omit<Settings, "taxRate"> & { taxRate: string };
-type FormErrors = Partial<Record<keyof SettingsForm, string>>;
+type SettingsForm = Omit<Settings, "taxRate">;
+type FormErrors = Partial<Record<keyof SettingsForm | "taxRate", string>>;
 
 function toForm(settings: Settings): SettingsForm {
-  return { ...settings, taxRate: String(settings.taxRate) };
+  const { taxRate: _taxRate, ...editable } = settings;
+  return editable;
 }
 
 function SettingsPage() {
@@ -60,7 +61,7 @@ function SettingsPage() {
 
   const save = async () => {
     if (businessState === "saving" || readStatus !== "ready") return;
-    const validation = validateBusinessSettings(form);
+    const validation = validateBusinessSettings({ ...form, taxRate: 18 });
     setErrors(validation);
     const firstInvalid = Object.keys(validation)[0] as keyof SettingsForm | undefined;
     if (firstInvalid) {
@@ -75,7 +76,7 @@ function SettingsPage() {
         businessName: form.businessName.trim(),
         businessAddress: form.businessAddress.trim(),
         businessPhone: form.businessPhone.trim(),
-        taxRate: Number(form.taxRate),
+        taxRate: 18,
         taxCalculationEnabled: form.taxCalculationEnabled === true,
       });
       dirty.current = false;
@@ -214,21 +215,6 @@ function SettingsPage() {
           />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Tasa de impuesto (%)" id="settings-taxRate" error={errors.taxRate}>
-            <Input
-              id="settings-taxRate"
-              type="number"
-              min={0}
-              max={100}
-              step="0.01"
-              inputMode="decimal"
-              value={form.taxRate}
-              disabled={readStatus !== "ready" || businessState === "saving" || resetting}
-              aria-invalid={Boolean(errors.taxRate)}
-              aria-describedby={`settings-taxRate-help${errors.taxRate ? " settings-taxRate-error" : ""}`}
-              onChange={(e) => editForm({ taxRate: e.target.value })}
-            />
-          </Field>
           <Field label="Código de moneda" id="settings-currency">
             <Input id="settings-currency" value="DOP" readOnly />
           </Field>

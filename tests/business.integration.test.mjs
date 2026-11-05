@@ -143,6 +143,8 @@ const integration = test.describe("local atomic financial operations", { skip: !
         tax_calculation_enabled: false,
         tax_policy_status: "approved",
         tax_policy_version: "chg25-test-fixture",
+        tax_policy_approved_at: new Date().toISOString(),
+        tax_policy_approved_by: admin.id,
         tax_receipt_mode: "internal",
         tax_prices_include: false,
         tax_rounding_policy: "line_half_up",
