@@ -69,6 +69,7 @@ type InventoryForm = Omit<
     | "costPrice"
     | "price"
     | "quantity"
+    | "taxClassification"
   >,
   "brand" | "presentation" | "unit"
 > & { brand: string; presentation: string; unit: string };
@@ -86,6 +87,7 @@ const emptyForm: InventoryForm = {
   costPrice: 0,
   price: 0,
   quantity: 0,
+  taxClassification: "pendiente",
 };
 
 function genSku() {
@@ -154,6 +156,7 @@ function InventoryPage() {
       brand: i.brand ?? "",
       presentation: i.presentation ?? "",
       unit: i.unit ?? "",
+      taxClassification: i.taxClassification ?? "pendiente",
       attributes: i.attributes ?? {},
     });
     setAttributesText(JSON.stringify(i.attributes ?? {}, null, 2));
@@ -505,6 +508,31 @@ function InventoryPage() {
                       onChange={(e) => setForm({ ...form, brand: e.target.value })}
                       placeholder="Grace Supply, Wahl, BaByliss"
                     />
+                  </Field>
+                  <Field label="Clasificación tributaria">
+                    <select
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      value={form.taxClassification}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          taxClassification: event.target
+                            .value as InventoryForm["taxClassification"],
+                        })
+                      }
+                      aria-describedby="inventory-tax-classification-help"
+                    >
+                      <option value="pendiente">Pendiente de clasificación</option>
+                      <option value="gravado">Gravado</option>
+                      <option value="exento">Exento</option>
+                    </select>
+                    <p
+                      id="inventory-tax-classification-help"
+                      className="text-xs text-muted-foreground"
+                    >
+                      La clasificación se aplicará solo cuando exista una política aprobada por el
+                      servidor.
+                    </p>
                   </Field>
                   <Field label="Presentación / Tamaño">
                     <Input

@@ -15,6 +15,13 @@ export const defaultSettings: Settings = {
   businessAddress: "Santo Domingo, República Dominicana",
   businessPhone: "+1 (809) 000-0000",
   taxRate: 18,
+  taxCalculationEnabled: false,
+  taxPolicyStatus: "pending",
+  taxPricesInclude: false,
+  taxPolicyVersion: null,
+  taxPolicyApprovedAt: null,
+  taxPolicyApprovedBy: null,
+  taxReceiptMode: "internal",
   currency: "DOP",
   labelWidthMm: 50,
   labelHeightMm: 30,
@@ -59,6 +66,29 @@ export const labelPresets = [
 ] as const;
 
 const SETTINGS_ID = "00000000-0000-0000-0000-000000000001";
+
+export async function approveSalesTaxPolicy(request: {
+  enabled: boolean;
+  rate: number;
+  policyVersion: string;
+  approve?: boolean;
+}) {
+  const { data, error } = await supabase.rpc(
+    "approve_sales_tax_policy" as never,
+    {
+      p_request: {
+        enabled: request.enabled,
+        rate: request.rate,
+        policy_version: request.policyVersion,
+        prices_include: false,
+        receipt_mode: "internal",
+        approve: request.approve !== false,
+      },
+    } as never,
+  );
+  if (error) throw persistenceFailure(error);
+  return data as Record<string, unknown>;
+}
 
 export function useSettings() {
   const [settings, setSettingsState] = useState<Settings>(defaultSettings);

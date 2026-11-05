@@ -137,10 +137,15 @@ const integration = test.describe("local atomic financial operations", { skip: !
     const policy = await service
       .from("settings")
       .update({
-        tax_rate: 0,
+        // CHG-25-compatible synthetic mode: approved policy, but calculation disabled.
+        tax_rate: 18,
         tax_policy_approved: true,
+        tax_calculation_enabled: false,
+        tax_policy_status: "approved",
+        tax_policy_version: "chg25-test-fixture",
+        tax_receipt_mode: "internal",
         tax_prices_include: false,
-        tax_rounding_policy: "synthetic-zero-tax-test-only",
+        tax_rounding_policy: "line_half_up",
       })
       .eq("id", settings.data.id);
     assert.ifError(policy.error);
@@ -239,6 +244,10 @@ const integration = test.describe("local atomic financial operations", { skip: !
         .update({
           tax_rate: testSettings.tax_rate,
           tax_policy_approved: testSettings.tax_policy_approved,
+          tax_calculation_enabled: testSettings.tax_calculation_enabled,
+          tax_policy_status: testSettings.tax_policy_status,
+          tax_policy_version: testSettings.tax_policy_version,
+          tax_receipt_mode: testSettings.tax_receipt_mode,
           tax_prices_include: testSettings.tax_prices_include,
           tax_rounding_policy: testSettings.tax_rounding_policy,
         })

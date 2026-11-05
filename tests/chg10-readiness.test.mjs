@@ -22,7 +22,7 @@ test("email auth provider remains available for invited-user login while public 
   assert.match(emailBlock, /^enable_signup\s*=\s*true\s*$/m);
 });
 
-test("installable migrations match the reviewed base and CHG-18/CHG-22/CHG-23/CHG-24 sequence", () => {
+test("installable migrations match the reviewed base and approved tax policy sequence", () => {
   const versions = readdirSync(migrationDir)
     .filter((file) => /^\d{14}_.+\.sql$/.test(file))
     .map((file) => file.slice(0, 14))
@@ -51,6 +51,7 @@ test("installable migrations match the reviewed base and CHG-18/CHG-22/CHG-23/CH
     "20261103031053",
     "20261103120000",
     "20261103133000",
+    "20261104145551",
   ]);
 });
 

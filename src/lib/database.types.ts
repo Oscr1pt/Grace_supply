@@ -104,6 +104,7 @@ export type Database = {
           cost_price: Numeric;
           price: Numeric;
           quantity: number;
+          tax_classification: "gravado" | "exento" | "pendiente";
         },
         "sku" | "name" | "category"
       >;
@@ -115,6 +116,9 @@ export type Database = {
           tax_rate: Numeric;
           tax: Numeric;
           total: Numeric;
+          tax_policy_version: string | null;
+          tax_calculation_enabled: boolean;
+          tax_receipt_mode: "internal";
           payment_type: "contado" | "credito" | null;
           due_date: string | null;
           voided_at: string | null;
@@ -132,6 +136,9 @@ export type Database = {
           name: string;
           unit_price: Numeric;
           quantity: number;
+          tax_classification: "gravado" | "exento" | "pendiente";
+          tax_rate: Numeric;
+          tax: Numeric;
         },
         "sale_id" | "item_id" | "sku" | "name" | "unit_price" | "quantity",
         [
@@ -267,6 +274,12 @@ export type Database = {
           tax_policy_approved: boolean;
           tax_prices_include: boolean | null;
           tax_rounding_policy: string | null;
+          tax_calculation_enabled: boolean;
+          tax_policy_status: "pending" | "approved";
+          tax_policy_version: string | null;
+          tax_policy_approved_at: string | null;
+          tax_policy_approved_by: UUID | null;
+          tax_receipt_mode: "internal";
         },
         never
       >;

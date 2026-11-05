@@ -56,6 +56,7 @@ export type InventoryItem = {
   costPrice: number;
   price: number;
   quantity: number;
+  taxClassification?: "gravado" | "exento" | "pendiente";
   createdAt: string;
 };
 
@@ -76,6 +77,9 @@ export type Sale = {
   taxRate: number;
   tax: number;
   total: number;
+  taxPolicyVersion?: string | null;
+  taxCalculationEnabled?: boolean;
+  receiptMode?: "internal";
   paymentType?: "contado" | "credito";
   dueDate?: string;
   createdAt: string;
@@ -187,6 +191,13 @@ export type Settings = {
   businessAddress: string;
   businessPhone: string;
   taxRate: number;
+  taxCalculationEnabled?: boolean;
+  taxPolicyStatus?: "pending" | "approved";
+  taxPricesInclude?: boolean;
+  taxPolicyVersion?: string | null;
+  taxPolicyApprovedAt?: string | null;
+  taxPolicyApprovedBy?: string | null;
+  taxReceiptMode?: "internal";
   currency: "DOP";
   /** Printed label size in millimeters */
   labelWidthMm: number;

@@ -1085,6 +1085,9 @@ function ReceiptDialog({ sale, onClose }: { sale: Sale | null; onClose: () => vo
             </div>
             <div className="text-xs text-gray-600 mt-1">{settings.businessAddress}</div>
             <div className="text-xs text-gray-600">{settings.businessPhone}</div>
+            <div className="mt-2 text-[11px] font-semibold tracking-wide">
+              RECIBO INTERNO — NO ES COMPROBANTE FISCAL
+            </div>
           </div>
           {sale.voidedAt && (
             <div className="mt-3 rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800">
@@ -1137,7 +1140,11 @@ function ReceiptDialog({ sale, onClose }: { sale: Sale | null; onClose: () => vo
               <span className="font-mono">{fmtMoney(sale.subtotal, settings.currency)}</span>
             </div>
             <div className="flex justify-between">
-              <span>Impuesto ({sale.taxRate}%)</span>
+              <span>
+                {sale.taxCalculationEnabled === false
+                  ? "ITBIS desactivado"
+                  : `ITBIS (${sale.taxRate}%)`}
+              </span>
               <span className="font-mono">{fmtMoney(sale.tax, settings.currency)}</span>
             </div>
             <div className="flex justify-between border-t border-gray-300 pt-1 font-semibold text-sm">
