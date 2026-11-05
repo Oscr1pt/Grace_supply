@@ -646,7 +646,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
         lines: [{ item_id: itemId, quantity: 1, expected_unit_price: "99.00" }],
       },
     });
-    assert.equal(changedPrice.error?.code, "40001");
+    assert.equal(changedPrice.error?.code, "PT409");
     const stockAfterSale = await service
       .from("inventory")
       .select("quantity")
@@ -1152,7 +1152,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
         reason: "Stale synthetic count",
       },
     });
-    assert.equal(stale.error?.code, "40001");
+    assert.equal(stale.error?.code, "PT409");
     const employeeActor = await signedIn(employee);
     const denied = await employeeActor.rpc("adjust_inventory", {
       p_request: {

@@ -10,10 +10,10 @@ const service = createClient(supabaseUrl, serviceRoleKey, {
 
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") return json(request, 204, {});
-  if (request.method !== "POST") return json(request, 405, { error: "MÃ©todo no permitido" });
+  if (request.method !== "POST") return json(request, 405, { error: "Método no permitido" });
 
   const token = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
-  if (!token) return json(request, 401, { error: "SesiÃ³n no vÃ¡lida" });
+  if (!token) return json(request, 401, { error: "Sesión no válida" });
 
   const caller = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
@@ -30,11 +30,11 @@ Deno.serve(async (request: Request) => {
   try {
     input = await request.json();
   } catch {
-    return json(request, 400, { error: "Solicitud invÃ¡lida" });
+    return json(request, 400, { error: "Solicitud inválida" });
   }
   const password = typeof input.password === "string" ? input.password : "";
   if (password.length < 12)
-    return json(request, 400, { error: "La contraseÃ±a debe tener al menos 12 caracteres." });
+    return json(request, 400, { error: "La contraseña debe tener al menos 12 caracteres." });
 
   const { data: profile, error: profileError } = await service
     .from("user_profiles")
@@ -42,22 +42,22 @@ Deno.serve(async (request: Request) => {
     .eq("auth_user_id", identity.user.id)
     .maybeSingle();
   if (profileError)
-    return json(request, 503, { error: "No se pudo verificar la configuraciÃ³n de la cuenta." });
+    return json(request, 503, { error: "No se pudo verificar la configuración de la cuenta." });
   if (!profile)
     return json(request, 403, {
-      error: "No existe una configuraciÃ³n inicial pendiente para esta identidad.",
+      error: "No existe una configuración inicial pendiente para esta identidad.",
     });
   if (profile.active)
     return json(request, 409, {
       error:
-        "La cuenta ya estÃ¡ activa. Solicita recuperaciÃ³n si necesitas cambiar la contraseÃ±a.",
+        "La cuenta ya está activa. Solicita recuperación si necesitas cambiar la contraseña.",
     });
   if (!profile.password_change_required) return json(request, 200, { completed: true });
 
   const changed = await service.auth.admin.updateUserById(identity.user.id, { password });
   if (changed.error)
     return json(request, 400, {
-      error: "No se pudo actualizar la contraseÃ±a. Intenta nuevamente.",
+      error: "No se pudo actualizar la contraseña. Intenta nuevamente.",
     });
 
   const completed = await service
@@ -71,7 +71,7 @@ Deno.serve(async (request: Request) => {
   if (completed.error || !completed.data) {
     return json(request, 503, {
       error:
-        "La contraseÃ±a se actualizÃ³, pero el servidor no pudo confirmar la finalizaciÃ³n. Reintenta para conciliar el resultado.",
+        "La contraseña se actualizó, pero el servidor no pudo confirmar la finalización. Reintenta para conciliar el resultado.",
     });
   }
 

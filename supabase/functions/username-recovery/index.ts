@@ -6,7 +6,7 @@ const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const enabled = Deno.env.get("ACCOUNT_RECOVERY_ENABLED") === "true";
 const probeEmail = "account-recovery-probe@invalid.gracesupply.local";
-const genericMessage = "Si la cuenta estÃ¡ habilitada y tiene un correo individual verificado, recibirÃ¡ instrucciones.";
+const genericMessage = "Si la cuenta está habilitada y tiene un correo individual verificado, recibirá instrucciones.";
 const service = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -37,17 +37,17 @@ function redirectUrl() {
 
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") return json(request, 204, {});
-  if (request.method !== "POST") return json(request, 405, { error: "MÃ©todo no permitido" });
-  if (!enabled) return json(request, 503, { error: "La recuperaciÃ³n no estÃ¡ habilitada." });
+  if (request.method !== "POST") return json(request, 405, { error: "Método no permitido" });
+  if (!enabled) return json(request, 503, { error: "La recuperación no está habilitada." });
 
   let body: { username?: unknown };
   try {
     body = await request.json();
   } catch {
-    return json(request, 400, { error: "Solicitud invÃ¡lida" });
+    return json(request, 400, { error: "Solicitud inválida" });
   }
   const username = normalizeUsername(body.username);
-  if (!username) return json(request, 400, { error: "Solicitud invÃ¡lida" });
+  if (!username) return json(request, 400, { error: "Solicitud inválida" });
 
   let email = probeEmail;
   try {

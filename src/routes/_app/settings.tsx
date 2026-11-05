@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { approveSalesTaxPolicy, useSettings } from "@/lib/settings";
+import { useSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,6 @@ function SettingsPage() {
   );
   const [savingLabels, setSavingLabels] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [taxApprovalState, setTaxApprovalState] = useState<"idle" | "saving" | "failed">("idle");
   const dirty = useRef(false);
 
   useEffect(() => {
@@ -77,6 +76,7 @@ function SettingsPage() {
         businessAddress: form.businessAddress.trim(),
         businessPhone: form.businessPhone.trim(),
         taxRate: Number(form.taxRate),
+        taxCalculationEnabled: form.taxCalculationEnabled === true,
       });
       dirty.current = false;
       setForm(toForm(confirmed));
@@ -97,6 +97,7 @@ function SettingsPage() {
         businessAddress: "Santo Domingo, República Dominicana",
         businessPhone: "+1 (809) 000-0000",
         taxRate: 18,
+        taxCalculationEnabled: false,
         currency: "DOP",
         labelWidthMm: 50,
         labelHeightMm: 30,
@@ -127,24 +128,6 @@ function SettingsPage() {
       throw error;
     } finally {
       setSavingLabels(false);
-    }
-  };
-
-  const approveTaxPolicy = async () => {
-    if (taxApprovalState === "saving" || readStatus !== "ready") return;
-    setTaxApprovalState("saving");
-    try {
-      await approveSalesTaxPolicy({
-        enabled: form.taxCalculationEnabled === true,
-        rate: Number(form.taxRate),
-        policyVersion: form.taxPolicyVersion?.trim() || "chg25-v1",
-      });
-      setTaxApprovalState("idle");
-      toast.success("La política tributaria fue confirmada por el servidor");
-      window.location.reload();
-    } catch (error) {
-      setTaxApprovalState("failed");
-      toast.error(userPersistenceMessage(error));
     }
   };
 
@@ -250,9 +233,19 @@ function SettingsPage() {
             <Input id="settings-currency" value="DOP" readOnly />
           </Field>
         </div>
+        <label className="flex items-center gap-2 text-sm" htmlFor="settings-tax-enabled">
+          <input
+            id="settings-tax-enabled"
+            type="checkbox"
+            checked={form.taxCalculationEnabled === true}
+            disabled={readStatus !== "ready" || businessState === "saving" || resetting}
+            onChange={(event) => editForm({ taxCalculationEnabled: event.target.checked })}
+          />
+          Aplicar ITBIS
+        </label>
         <p id="settings-taxRate-help" className="text-sm text-muted-foreground">
-          Configurar una tasa no aprueba la política fiscal ni habilita las ventas. La aprobación se
-          gestiona por separado.
+          La tasa admitida para V1 es 18 %. Activa Aplicar ITBIS solo cuando la configuración
+          operativa haya sido revisada por un administrador autorizado.
         </p>
         <div className="flex flex-wrap items-center gap-2 pt-2">
           <Button
@@ -297,72 +290,6 @@ function SettingsPage() {
           </span>
         </div>
       </form>
-
-      <section
-        className="rounded-lg border border-border bg-card p-6 max-w-xl mt-6"
-        aria-labelledby="sales-tax-heading"
-      >
-        <h3 id="sales-tax-heading" className="font-display text-lg">
-          Ventas e impuestos
-        </h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Propuesta local: ITBIS del 18% sobre artículos gravados y precios sin impuesto incluido.
-          Guardar esta propuesta no aprueba la política ni habilita ventas.
-        </p>
-        <div className="mt-4 space-y-3">
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={readStatus !== "ready" || taxApprovalState === "saving" || resetting}
-              >
-                {taxApprovalState === "saving"
-                  ? "Confirmandoâ€¦"
-                  : "Confirmar polÃ­tica en el servidor"}
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Confirmar configuraciÃ³n de ventas e impuestos</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Esta acciÃ³n registra tu identidad, la versiÃ³n y la fecha de aprobaciÃ³n.
-                  Confirma solo despuÃ©s de revisar la polÃ­tica con el propietario y el asesor
-                  contable.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={() => void approveTaxPolicy()}>
-                  Confirmar aprobaciÃ³n
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          <label className="flex items-center gap-2 text-sm" htmlFor="settings-tax-enabled">
-            <input
-              id="settings-tax-enabled"
-              type="checkbox"
-              checked={form.taxCalculationEnabled === true}
-              disabled={readStatus !== "ready" || businessState === "saving" || resetting}
-              onChange={(event) => editForm({ taxCalculationEnabled: event.target.checked })}
-            />
-            Aplicar ITBIS (18%)
-          </label>
-          <p className="text-sm" role="status">
-            Estado de la política:{" "}
-            <strong>{form.taxPolicyStatus === "approved" ? "Aprobada" : "Pendiente"}</strong>
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Los productos deben clasificarse como gravados, exentos o pendientes. Mientras la
-            política esté pendiente, PostgreSQL mantendrá bloqueada la contabilización.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Los recibos serán documentos internos sin validez de comprobante fiscal; no se generan
-            NCF ni e-CF.
-          </p>
-        </div>
-      </section>
 
       <div className="max-w-xl mt-6">
         <h3 className="font-display text-lg mb-2">Etiquetas de código de barras</h3>

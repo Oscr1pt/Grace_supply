@@ -29,13 +29,8 @@ export function validateBusinessSettings({
     errors.taxRate = "Escribe una tasa numérica entre 0 y 100.";
   } else {
     const rate = Number(taxText);
-    if (
-      !Number.isFinite(rate) ||
-      rate < 0 ||
-      rate > 100 ||
-      (taxText.split(".")[1]?.length ?? 0) > 2
-    ) {
-      errors.taxRate = "Usa un número entre 0 y 100 con hasta dos decimales.";
+    if (!Number.isFinite(rate) || rate !== 18 || (taxText.split(".")[1]?.length ?? 0) > 2) {
+      errors.taxRate = "La V1 solo admite la tasa general de 18 %.";
     }
   }
 

@@ -19,12 +19,12 @@ test("business settings rejects blank names, malformed phones, and invalid tax r
   );
 });
 
-test("business settings accepts a valid zero tax rate and formatted phone", () => {
+test("business settings accepts the supported V1 rate and formatted phone", () => {
   assert.deepEqual(
     validateBusinessSettings({
       businessName: " Grace Supply ",
       businessPhone: "+1 (809) 555-0100",
-      taxRate: "0",
+      taxRate: "18",
     }),
     {},
   );

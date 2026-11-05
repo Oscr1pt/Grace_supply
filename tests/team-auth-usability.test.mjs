@@ -186,7 +186,7 @@ test("account-management and recovery feedback stays in Spanish", () => {
   );
   assert.doesNotMatch(
     recoverySource,
-    /recuperaciÃ³n|habilitara|mÃ¡s tarde/i,
+    /[\u00c3\u00c2\ufffd]/u,
     "recovery screen must not contain mojibake",
   );
   assert.match(recoverySource, /recuperación/i, "recovery copy must use proper Spanish accents");

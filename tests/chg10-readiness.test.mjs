@@ -52,6 +52,8 @@ test("installable migrations match the reviewed base and approved tax policy seq
     "20261103120000",
     "20261103133000",
     "20261104145551",
+    "20261104160000",
+    "20261104163000",
   ]);
 });
 

@@ -26,6 +26,7 @@ const knownBusinessErrors = new Set([
   "23505",
   "23514",
   "40001",
+  "PT409",
   "42501",
   "55000",
 ]);
@@ -76,7 +77,7 @@ export async function postBusinessOperation(
         "La política de cálculo tributario requiere aprobación antes de registrar ventas.",
       );
     }
-    if (response.error.code === "40001") {
+    if (response.error.code === "40001" || response.error.code === "PT409") {
       throw new PersistenceError(
         "conflict",
         "Los datos cambiaron mientras se preparaba la operación. Actualiza y confirma de nuevo.",

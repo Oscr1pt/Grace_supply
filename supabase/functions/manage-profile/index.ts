@@ -179,7 +179,7 @@ Deno.serve(async (request: Request) => {
   if (input.action === "create_user") {
     if (!provisioningEnabled)
       return json(request, 503, {
-        error: "La creaciÃ³n de cuentas no estÃ¡ habilitada en este entorno.",
+        error: "La creación de cuentas no está habilitada en este entorno.",
       });
     const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
     const name = typeof input.name === "string" ? input.name.trim() : "";
@@ -196,12 +196,12 @@ Deno.serve(async (request: Request) => {
       initialPassword.length < 12
     ) {
       return json(request, 400, {
-        error: "Revisa el nombre, usuario, correo, telÃ©fono, rol y contraseÃ±a inicial.",
+        error: "Revisa el nombre, usuario, correo, teléfono, rol y contraseña inicial.",
       });
     }
     if (role === "admin" && input.confirm_admin_creation !== true) {
       return json(request, 409, {
-        error: "Confirma explÃ­citamente la creaciÃ³n de una cuenta administradora.",
+        error: "Confirma explícitamente la creación de una cuenta administradora.",
       });
     }
     const { data: existing, error: existingError } = await service
@@ -211,7 +211,7 @@ Deno.serve(async (request: Request) => {
       .maybeSingle();
     if (existingError)
       return json(request, 503, { error: "No se pudo verificar la disponibilidad del usuario." });
-    if (existing) return json(request, 409, { error: "El nombre de usuario ya estÃ¡ ocupado." });
+    if (existing) return json(request, 409, { error: "El nombre de usuario ya está ocupado." });
     try {
       if (await authEmailAlreadyExists(email))
         return json(request, 409, { error: "El correo ya está asociado a una cuenta." });
@@ -228,14 +228,14 @@ Deno.serve(async (request: Request) => {
       return json(request, 503, { error: "No se pudo verificar el estado del aprovisionamiento." });
     if (openIncident)
       return json(request, 423, {
-        error: "La cuenta requiere revisiÃ³n administrativa antes de intentar otra vez.",
+        error: "La cuenta requiere revisión administrativa antes de intentar otra vez.",
       });
 
     let redirectTo: string;
     try {
       redirectTo = inviteRedirectUrl("/setup-account");
     } catch {
-      return json(request, 503, { error: "El servicio de invitaciÃ³n no estÃ¡ configurado." });
+      return json(request, 503, { error: "El servicio de invitación no está configurado." });
     }
     const { data: createdIdentity, error: createError } = await service.auth.admin.createUser({
       email,
@@ -331,8 +331,8 @@ Deno.serve(async (request: Request) => {
       );
       return json(request, incidentId ? 503 : 409, {
         error: incidentId
-          ? "El perfil no se guardÃ³ y la identidad requiere revisiÃ³n administrativa."
-          : "El perfil no se guardÃ³ y la identidad fue cancelada.",
+          ? "El perfil no se guardó y la identidad requiere revisión administrativa."
+          : "El perfil no se guardó y la identidad fue cancelada.",
         ...(incidentId ? { incidentId } : {}),
       });
     }
@@ -348,7 +348,7 @@ Deno.serve(async (request: Request) => {
     const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
     const name = typeof input.name === "string" ? input.name.trim() : "";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !name || name.length > 120) {
-      return json(request, 400, { error: "Solicitud invÃ¡lida" });
+      return json(request, 400, { error: "Solicitud inválida" });
     }
     const { data: existing, error: existingError } = await service
       .from("user_profiles")
@@ -356,20 +356,20 @@ Deno.serve(async (request: Request) => {
       .eq("normalized_username", username)
       .maybeSingle();
     if (existingError) return json(request, 503, { error: "No se pudo verificar el perfil" });
-    if (existing) return json(request, 409, { error: "El nombre de usuario ya estÃ¡ ocupado." });
+    if (existing) return json(request, 409, { error: "El nombre de usuario ya está ocupado." });
 
     let redirectTo: string;
     try {
       redirectTo = inviteRedirectUrl();
     } catch {
-      return json(request, 503, { error: "El servicio de invitaciÃ³n no estÃ¡ configurado." });
+      return json(request, 503, { error: "El servicio de invitación no está configurado." });
     }
     const { data: invitation, error: inviteError } = await service.auth.admin.inviteUserByEmail(
       email,
       { redirectTo },
     );
     if (inviteError || !invitation.user)
-      return json(request, 409, { error: "No se pudo crear la invitaciÃ³n." });
+      return json(request, 409, { error: "No se pudo crear la invitación." });
     const allowedPermissions = [
       "dashboard",
       "clients",
@@ -552,7 +552,7 @@ Deno.serve(async (request: Request) => {
   if (input.action === "activate") {
     if (target.password_change_required) {
       return json(request, 409, {
-        error: "La persona debe establecer su contraseÃ±a personal antes de activar el acceso.",
+        error: "La persona debe establecer su contraseña personal antes de activar el acceso.",
       });
     }
     const { data: authTarget, error: authTargetError } = await service.auth.admin.getUserById(
@@ -589,11 +589,11 @@ Deno.serve(async (request: Request) => {
   }
   if (input.role === "admin" || input.role === "employee") {
     if (target.auth_user_id === identity.user.id && input.role !== target.role) {
-      return json(request, 409, { error: "No puedes cambiar tu propio rol desde esta sesiÃ³n." });
+      return json(request, 409, { error: "No puedes cambiar tu propio rol desde esta sesión." });
     }
     if (input.role === "admin" && input.confirm_admin_role !== true) {
       return json(request, 409, {
-        error: "Confirma explÃ­citamente la asignaciÃ³n del rol administrador.",
+        error: "Confirma explícitamente la asignación del rol administrador.",
       });
     }
     if (target.auth_user_id === identity.user.id && input.role !== "admin") {

@@ -123,7 +123,7 @@ export function employeeActionErrorMessage(error, action) {
   if (status === 403) return "No tienes permiso para administrar esta cuenta.";
   if (status === 423) return "La cuenta requiere revisión administrativa antes de activarse.";
   if (status === 503 && action === "create")
-    return "La creaciÃ³n de cuentas no estÃ¡ habilitada en este entorno.";
+    return "La creación de cuentas no está habilitada en este entorno.";
   if (status === 503 && action === "invite")
     return "Las invitaciones no están habilitadas en este entorno.";
   if (status === 409) {

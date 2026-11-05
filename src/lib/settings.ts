@@ -100,7 +100,33 @@ export function useSettings() {
   if (!writerRef.current) {
     writerRef.current = createSettingsWriter({
       getConfirmed: () => confirmedRef.current,
-      persist: async (_next, patch) => {
+      persist: async (next, patch) => {
+        const usesV1TaxSettings = [
+          "businessName",
+          "businessAddress",
+          "businessPhone",
+          "taxRate",
+          "taxCalculationEnabled",
+        ].some((key) => key in patch);
+        if (usesV1TaxSettings) {
+          const { data, error } = await supabase.rpc(
+            "save_sales_tax_v1" as never,
+            {
+              p_request: {
+                business_name: next.businessName,
+                business_address: next.businessAddress,
+                business_phone: next.businessPhone,
+                tax_rate: Number(next.taxRate),
+                tax_calculation_enabled: next.taxCalculationEnabled === true,
+              },
+            } as never,
+          );
+          if (error) throw persistenceFailure(error);
+          return {
+            ...defaultSettings,
+            ...fromDb<Partial<Settings>>(data as Record<string, unknown>),
+          };
+        }
         const response = await supabase
           .from("settings")
           .update(toDb(patch as Record<string, unknown>) as never)

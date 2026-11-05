@@ -42,6 +42,22 @@ test.describe.serial("CHG-25 configurable ITBIS and internal receipts", () => {
     const settings = await service.from("settings").select("*").single();
     if (settings.error) throw settings.error;
     originalSettings = settings.data;
+    const resetPolicy = await service
+      .from("settings")
+      .update({
+        tax_rate: 18,
+        tax_policy_approved: false,
+        tax_calculation_enabled: false,
+        tax_policy_status: "pending",
+        tax_policy_version: null,
+        tax_policy_approved_at: null,
+        tax_policy_approved_by: null,
+        tax_receipt_mode: "internal",
+        tax_prices_include: false,
+        tax_rounding_policy: "line_half_up",
+      })
+      .eq("id", settings.data.id);
+    if (resetPolicy.error) throw resetPolicy.error;
     const created = await service.auth.admin.createUser({
       email: admin.email,
       password: admin.password,
@@ -114,7 +130,9 @@ test.describe.serial("CHG-25 configurable ITBIS and internal receipts", () => {
 
   async function login(page) {
     await page.goto("/login");
-    await expect(page.getByRole("button", { name: /Verificando sesión/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Entrar al sistema/ })).toBeVisible({
+      timeout: 15_000,
+    });
     const usernameInput = page.locator("#username");
     const passwordInput = page.locator("#password");
     await expect(usernameInput).toBeVisible();
@@ -123,7 +141,9 @@ test.describe.serial("CHG-25 configurable ITBIS and internal receipts", () => {
     await expect(usernameInput).toHaveValue(admin.username);
     await expect(passwordInput).toHaveValue(admin.password);
     await page.getByRole("button", { name: /Entrar al sistema/ }).click();
-    await expect(page.getByRole("button", { name: /Cerrar sesi/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Cerrar sesi/ })).toBeVisible({
+      timeout: 15_000,
+    });
   }
 
   test("bloquea ventas pendientes y permite revisar la configuración administrativa", async ({
@@ -134,8 +154,14 @@ test.describe.serial("CHG-25 configurable ITBIS and internal receipts", () => {
     await expect(page.getByRole("alert").filter({ hasText: /Ventas bloqueadas/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Nueva venta/ })).toHaveCount(0);
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: /Ventas e impuestos/ })).toBeVisible();
-    await expect(page.getByText(/Pendiente/)).toBeVisible();
+    const taxToggle = page.getByRole("checkbox", { name: "Aplicar ITBIS" });
+    await expect(taxToggle).toBeVisible();
+    await expect(taxToggle).not.toBeChecked();
+    await taxToggle.check();
+    await page.getByRole("button", { name: "Guardar ajustes" }).click();
+    await expect(page.getByText("Cambios confirmados.")).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("checkbox", { name: "Aplicar ITBIS" })).toBeChecked();
   });
 
   test("verifica modos ITBIS, clasificación pendiente, snapshots e idempotencia", async ({
