@@ -72,6 +72,12 @@ export async function postBusinessOperation(
   // A database rejection is definitive; do not hide it behind a stale result lookup.
   if (response.error.code && knownBusinessErrors.has(response.error.code)) {
     if (response.error.code === "55000" && operation === "sale") {
+      if (response.error.message?.includes("tax_classification_pending")) {
+        throw new PersistenceError(
+          "validation",
+          "Clasifica todos los productos como Gravado o Exento antes de vender con ITBIS activo.",
+        );
+      }
       throw new PersistenceError(
         "validation",
         "La política de cálculo tributario requiere aprobación antes de registrar ventas.",

@@ -44,6 +44,7 @@ import { persistenceFailure } from "@/lib/persistence.js";
 import { validateInventoryAdjustment } from "@/lib/inventoryAdjustment.js";
 import { createInitialInventoryRequest, validateInitialInventory } from "@/lib/initialInventory.js";
 import { postBusinessOperation } from "@/lib/businessOperations";
+import { setProductTaxClassification } from "@/lib/taxClassification.js";
 import {
   clearPendingBusinessOperation,
   persistPendingBusinessOperation,
@@ -240,12 +241,23 @@ function InventoryPage() {
         price: price as number,
       };
       if (editing) {
-        const { quantity: _stock, ...metadataAndPrice } = catalogItem;
+        const {
+          quantity: _stock,
+          taxClassification: _taxClassification,
+          ...metadataAndPrice
+        } = catalogItem;
         await updateItem(editing.id, metadataAndPrice);
+        if (form.taxClassification !== (editing.taxClassification ?? "pendiente")) {
+          await setProductTaxClassification(editing.id, form.taxClassification ?? "pendiente");
+        }
         toast.success("Producto actualizado");
       } else {
         if (!initialProductId) {
-          await insertItem({ createdAt: new Date().toISOString(), ...catalogItem });
+          const { taxClassification: _taxClassification, ...insertableCatalogItem } = catalogItem;
+          await insertItem({ createdAt: new Date().toISOString(), ...insertableCatalogItem });
+        }
+        if (form.taxClassification !== "pendiente") {
+          await setProductTaxClassification(productId, form.taxClassification ?? "pendiente");
         }
         const initialQuantity = initialValidation?.ok ? initialValidation.quantity : 0;
         if (initialQuantity > 0) {
@@ -513,6 +525,7 @@ function InventoryPage() {
                     <select
                       className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                       value={form.taxClassification}
+                      disabled={!can("inventory") || pending}
                       onChange={(event) =>
                         setForm({
                           ...form,

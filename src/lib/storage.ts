@@ -38,6 +38,7 @@ function toUpdateDb(table: DomainTable, value: Record<string, unknown>) {
     table === "clients" ? pickClientMutationFields(value, { includeId: false }) : value,
   );
   delete row.id;
+  if (serverTimestampTables.has(table)) delete row.created_at;
   return row;
 }
 

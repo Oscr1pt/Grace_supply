@@ -26,7 +26,13 @@ export function calculateSaleTax(lines, policy) {
     return { status: "blocked", subtotal: 0, tax: 0, total: 0, lines: [] };
   }
   const rate = Number(policy.rate);
-  if (!Number.isFinite(rate) || rate < 0 || rate > 100 || policy.pricesInclude !== false) {
+  if (
+    !Number.isFinite(rate) ||
+    rate < 0 ||
+    rate > 100 ||
+    policy.pricesInclude !== false ||
+    (policy.enabled === true && rate !== PROPOSED_ITBIS_RATE)
+  ) {
     return { status: "unsupported", subtotal: 0, tax: 0, total: 0, lines: [] };
   }
   if (policy.enabled === true && lines.some((line) => line.taxClassification === "pendiente")) {

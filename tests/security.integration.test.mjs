@@ -1022,6 +1022,7 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
       "price",
       "quantity",
       "sku",
+      "tax_classification",
     ]);
     const hiddenBaseRows = await sales
       .from("inventory")

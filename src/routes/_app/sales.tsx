@@ -36,6 +36,7 @@ import { useAuth } from "@/lib/auth";
 import { clampSaleQuantity } from "@/lib/catalog.js";
 import { supabase } from "@/lib/supabase";
 import { deriveSalesPolicyState } from "@/lib/salesPolicy.js";
+import { calculateSaleTax } from "@/lib/salesTaxPolicy.js";
 import { validateSaleDraft } from "@/lib/businessDocumentValidation.js";
 import {
   clearPendingBusinessOperation,
@@ -76,6 +77,7 @@ function SalesPage() {
     "loading" | "unknown" | "blocked" | "unsupported" | "approved"
   >("loading");
   const [taxPolicyError, setTaxPolicyError] = useState<string | null>(null);
+  const [taxPolicyConfig, setTaxPolicyConfig] = useState({ enabled: false, rate: 18 });
   const policyRequest = useRef(0);
   const [pendingOperationType, setPendingOperationType] = useState<string | null>(null);
   const [pendingOperationError, setPendingOperationError] = useState<string | null>(null);
@@ -109,8 +111,18 @@ function SalesPage() {
         .from("sales_posting_status")
         .select("tax_policy_approved,sales_posting_supported")
         .maybeSingle();
+      const { data: previewConfig } = await supabase
+        .from("sales_tax_preview_status")
+        .select("tax_calculation_enabled,tax_rate,tax_policy_status")
+        .maybeSingle();
       const state = deriveSalesPolicyState({ data, error });
       if (request === policyRequest.current) {
+        if (previewConfig) {
+          setTaxPolicyConfig({
+            enabled: previewConfig.tax_calculation_enabled === true,
+            rate: Number(previewConfig.tax_rate ?? 18),
+          });
+        }
         setTaxPolicyState(state);
         if (state === "unknown")
           setTaxPolicyError(
@@ -183,9 +195,21 @@ function SalesPage() {
     }
   }, [user?.authUserId]);
 
-  const subtotal = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
-  const tax = +(subtotal * (settings.taxRate / 100)).toFixed(2);
-  const total = subtotal + tax;
+  const saleTaxPreview = calculateSaleTax(
+    lines.map((line) => ({
+      ...line,
+      taxClassification: line.taxClassification ?? "pendiente",
+    })),
+    {
+      enabled: taxPolicyConfig.enabled,
+      rate: taxPolicyConfig.rate,
+      pricesInclude: settings.taxPricesInclude === true,
+      status: taxPolicyState === "approved" ? "approved" : "pending",
+    },
+  );
+  const subtotal = saleTaxPreview.subtotal;
+  const tax = saleTaxPreview.tax;
+  const total = saleTaxPreview.total;
 
   const addLine = () => {
     const item = inventory.find((i) => i.id === pickItem);
@@ -204,7 +228,14 @@ function SalesPage() {
     } else {
       setLines([
         ...lines,
-        { itemId: item.id, sku: item.sku, name: item.name, unitPrice: item.price, quantity: 1 },
+        {
+          itemId: item.id,
+          sku: item.sku,
+          name: item.name,
+          unitPrice: item.price,
+          quantity: 1,
+          taxClassification: item.tax_classification ?? "pendiente",
+        },
       ]);
     }
     setPickItem("");
@@ -251,6 +282,13 @@ function SalesPage() {
     setSaleValidationErrors(errors);
     if (Object.keys(errors).length) {
       toast.error(Object.values(errors)[0]);
+      return;
+    }
+    if (taxPolicyConfig.enabled && lines.some((line) => line.taxClassification === "pendiente")) {
+      const message =
+        "Clasifica todos los productos como Gravado o Exento antes de vender con ITBIS activo.";
+      setSaleValidationErrors({ lines: message });
+      toast.error(message);
       return;
     }
     if (!user?.authUserId) {
@@ -306,6 +344,12 @@ function SalesPage() {
           name: String(line.name),
           unitPrice: Number(line.unit_price),
           quantity: Number(line.quantity),
+          taxClassification:
+            line.tax_classification === "gravado" ||
+            line.tax_classification === "exento" ||
+            line.tax_classification === "pendiente"
+              ? line.tax_classification
+              : undefined,
         })),
         subtotal: Number(result.subtotal),
         taxRate: Number(result.tax_rate ?? 0),
@@ -799,11 +843,17 @@ function SalesPage() {
                 <div className="ml-auto w-full sm:w-64 space-y-1 text-sm">
                   <Row label="Subtotal" value={fmtMoney(subtotal, settings.currency)} />
                   <Row
-                    label={`Impuesto (${settings.taxRate}%)`}
+                    label={`ITBIS (${taxPolicyConfig.enabled ? taxPolicyConfig.rate : 0}%)`}
                     value={fmtMoney(tax, settings.currency)}
                   />
                   <div className="h-px bg-border my-1" />
                   <Row label="Estimado" value={fmtMoney(total, settings.currency)} bold />
+                  {taxPolicyConfig.enabled &&
+                    lines.some((line) => line.taxClassification === "pendiente") && (
+                      <p className="text-xs text-destructive" role="alert">
+                        Hay productos pendientes de clasificación. Clasifícalos antes de confirmar.
+                      </p>
+                    )}
                   <p className="text-xs text-muted-foreground">
                     El servidor calculará y confirmará el importe antes de registrar la venta.
                   </p>

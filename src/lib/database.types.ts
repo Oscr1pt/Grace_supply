@@ -306,7 +306,14 @@ export type Database = {
         Relationships: [];
       };
       sales_inventory_lookup: {
-        Row: { id: UUID; sku: string; name: string; price: Numeric; quantity: number };
+        Row: {
+          id: UUID;
+          sku: string;
+          name: string;
+          price: Numeric;
+          quantity: number;
+          tax_classification: "gravado" | "exento" | "pendiente";
+        };
         Relationships: [];
       };
       sales_receipt_settings: {
@@ -321,6 +328,14 @@ export type Database = {
       };
       sales_posting_status: {
         Row: { tax_policy_approved: boolean; sales_posting_supported: boolean };
+        Relationships: [];
+      };
+      sales_tax_preview_status: {
+        Row: {
+          tax_calculation_enabled: boolean;
+          tax_rate: Numeric;
+          tax_policy_status: "pending" | "approved";
+        };
         Relationships: [];
       };
       purchases_supplier_lookup: {
@@ -347,6 +362,7 @@ export type Database = {
           cost_price: Numeric;
           price: Numeric;
           quantity: number;
+          tax_classification: "gravado" | "exento" | "pendiente";
           created_at: string;
           description: string;
           brand: string | null;
@@ -358,7 +374,12 @@ export type Database = {
         Relationships: [];
       };
     };
-    Functions: Record<never, never>;
+    Functions: {
+      set_product_tax_classification: {
+        Args: { p_request: Json };
+        Returns: Json;
+      };
+    };
     Enums: Record<never, never>;
     CompositeTypes: Record<never, never>;
   };
