@@ -41,6 +41,8 @@ export type User = {
   role: Role;
   permissions: Permission[];
   active: boolean;
+  passwordChangeRequired?: boolean;
+  emailConfirmed?: boolean | null;
   authUserId?: string;
 };
 type UserListStatus = "loading" | "ready" | "error";
@@ -53,7 +55,7 @@ type AuthCtx = {
   users: User[];
   usersStatus: UserListStatus;
   usersError: string | null;
-  refreshUsers: () => Promise<void>;
+  refreshUsers: () => Promise<boolean>;
   authReady: boolean;
   passwordSetupStatus: "none" | "pending" | "ready" | "error" | "complete";
   passwordSetupError: string | null;
@@ -100,6 +102,8 @@ type ProfileRow = {
   role: Role;
   permissions: string[];
   active: boolean;
+  password_change_required?: boolean;
+  email_confirmed?: boolean | null;
 };
 
 function toPublic(row: ProfileRow, authUserId?: string): User {
@@ -114,6 +118,8 @@ function toPublic(row: ProfileRow, authUserId?: string): User {
     role,
     permissions: role === "admin" ? ALL_PERMISSIONS : permissions,
     active: row.active,
+    passwordChangeRequired: row.password_change_required === true,
+    emailConfirmed: typeof row.email_confirmed === "boolean" ? row.email_confirmed : null,
     authUserId,
   };
 }
@@ -149,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data, error } = await supabase
       .from("user_profiles")
-      .select("username, name, phone, role, permissions, active")
+      .select("username, name, phone, role, permissions, active, password_change_required")
       .eq("auth_user_id", authResult.user.id as UUID)
       .maybeSingle();
     if (error) throw new ProfileLoadError();
@@ -163,20 +169,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsersError(null);
     const { data, error } = await supabase
       .from("user_profiles")
-      .select("username, name, phone, role, permissions, active")
+      .select("username, name, phone, role, permissions, active, password_change_required")
       .order("username");
     if (error) {
-      if (revision !== authRevision.current) return;
+      if (revision !== authRevision.current) return false;
       const message = userPersistenceMessage(error);
       setReadFailure("user_profiles", message);
       setUsersError(message);
       setUsersStatus("error");
-      return;
+      return false;
     }
-    if (revision !== authRevision.current) return;
+    if (revision !== authRevision.current) return false;
     setUsers((data ?? []).map((profile) => toPublic(profile as ProfileRow)));
     setUsersStatus("ready");
     setReadFailure("user_profiles", null);
+    return true;
   }, []);
 
   const announceInvalidation = useCallback(() => {
@@ -210,6 +217,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         profile = await loadCurrentProfile();
       } catch {
+        // During invitation/recovery setup the profile is intentionally
+        // inactive, so RLS may reject its private profile read. The Auth
+        // callback identity is still sufficient to finish password setup;
+        // do not turn that expected denial into an expired-link state.
+        if (passwordSetupFlowActive.current && passwordSetupIdentity.current === session.user.id) {
+          if (revision === authRevision.current) setAuthReady(true);
+          return;
+        }
         if (revision === authRevision.current) setAuthReady(true);
         return;
       }
@@ -328,6 +343,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const initialRevision = authRevision.current;
     void supabase.auth.getSession().then(({ data, error }) => {
       if (initialRevision !== authRevision.current) return;
+      if (passwordSetupFlowActive.current && !initialAuthCallback.hasError && data.session?.user) {
+        // A verified invite can arrive through INITIAL_SESSION before the
+        // auth-state listener callback. Record the temporary identity here so
+        // an inactive profile (expected during setup) is not mistaken for an
+        // expired or invalid link.
+        passwordSetupIdentity.current = data.session.user.id;
+      }
       if (error) {
         void acceptSession(null, initialRevision);
         if (
@@ -340,15 +362,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
+      // A valid hash callback can report no session on the first getSession
+      // tick while auth-js is still exchanging it. Let the auth-state event
+      // decide readiness; only explicit getSession errors mark the link bad.
+      void acceptSession(data.session, initialRevision);
       if (
         passwordSetupFlowActive.current &&
         !initialAuthCallback.hasError &&
-        !passwordSetupIdentity.current
+        data.session?.user &&
+        passwordSetupIdentity.current === data.session.user.id
       ) {
-        setPasswordSetupError("El enlace venció, ya fue utilizado o no es válido.");
-        setPasswordSetupStatus("error");
+        setPasswordSetupError(null);
+        setPasswordSetupStatus("ready");
       }
-      void acceptSession(data.session, initialRevision);
     });
     return () => {
       authListener.subscription.unsubscribe();
@@ -473,6 +499,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username: string,
       patch: { name?: string; phone?: string | null; role?: Role; permissions?: Permission[] },
     ) => {
+      const expected = {
+        ...(patch.name ? { name: patch.name.trim() } : {}),
+        ...(Object.hasOwn(patch, "phone") ? { phone: patch.phone } : {}),
+        ...(patch.role ? { role: patch.role } : {}),
+        ...(patch.permissions ? { permissions: patch.permissions } : {}),
+      };
+      const reconcile = async () => {
+        const { data: persisted, error: readError } = await supabase
+          .from("user_profiles")
+          .select("username, name, phone, role, permissions, active, password_change_required")
+          .eq("username", username.trim().toLowerCase())
+          .maybeSingle();
+        if (readError || !persisted) return false;
+        try {
+          requireConfirmedEmployeeProfile({ profile: persisted }, username, expected);
+          setUsers((current) =>
+            current.map((entry) =>
+              entry.username.toLowerCase() === username.trim().toLowerCase()
+                ? toPublic(persisted as ProfileRow, entry.authUserId)
+                : entry,
+            ),
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      };
       const { data, error } = await supabase.functions.invoke<{ profile: ProfileRow }>(
         "manage-profile",
         {
@@ -484,14 +537,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
         },
       );
-      if (error) throw new Error(employeeActionErrorMessage(error, "update"));
-      requireConfirmedEmployeeProfile(data, username, {
-        ...(patch.name ? { name: patch.name.trim() } : {}),
-        ...(Object.hasOwn(patch, "phone") ? { phone: patch.phone } : {}),
-        ...(patch.role ? { role: patch.role } : {}),
-        ...(patch.permissions ? { permissions: patch.permissions } : {}),
-      });
-      await refreshUsers();
+      if (error) {
+        const status =
+          error &&
+          typeof error === "object" &&
+          "context" in error &&
+          error.context instanceof Response
+            ? error.context.status
+            : 0;
+        const mayHavePersisted = status === 0 || status === 409 || status === 503;
+        if (!mayHavePersisted || !(await reconcile()))
+          throw new Error(employeeActionErrorMessage(error, "update"));
+      } else {
+        try {
+          requireConfirmedEmployeeProfile(data, username, expected);
+        } catch (confirmationError) {
+          if (!(await reconcile())) throw confirmationError;
+        }
+      }
+      if (!(await refreshUsers())) {
+        const reconciled = await reconcile();
+        if (!reconciled) {
+          throw new Error("El cambio se guardó, pero no se pudo confirmar la lista actualizada.");
+        }
+      }
       announceInvalidation();
       if (username === user?.username) await revalidateSession(true);
     },
@@ -599,6 +668,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.auth.signOut({ scope: "local" });
       if (error) throw new Error("No se pudo cerrar la sesión temporal. Intenta de nuevo.");
     }
+    // Invalidate any deferred callback from the temporary invite session
+    // before allowing a normal login on the same page.
+    authRevision.current += 1;
+    loginAttempt.current += 1;
     passwordSetupFlowActive.current = false;
     passwordSetupIdentity.current = null;
     setPasswordSetupError(null);

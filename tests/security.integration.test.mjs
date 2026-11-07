@@ -36,6 +36,7 @@ let seedSupplierCreditId;
 let seedClientPaymentId;
 let seedSupplierPaymentId;
 let seedExpenseId;
+let originalTaxSettings;
 const service =
   enabled && url && serviceKey
     ? createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
@@ -65,6 +66,29 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
       /^supabase_db_[a-z0-9-]+$/,
       "an explicit local PostgreSQL container is required",
     );
+    const settingsSnapshot = await service
+      .from("settings")
+      .select(
+        "tax_rate,tax_calculation_enabled,tax_policy_approved,tax_policy_status,tax_policy_version,tax_policy_approved_at,tax_policy_approved_by,tax_receipt_mode",
+      )
+      .eq("id", "00000000-0000-0000-0000-000000000001")
+      .single();
+    assert.ifError(settingsSnapshot.error);
+    originalTaxSettings = settingsSnapshot.data;
+    const resetTaxPolicy = await service
+      .from("settings")
+      .update({
+        tax_rate: 18,
+        tax_calculation_enabled: false,
+        tax_policy_approved: false,
+        tax_policy_status: "pending",
+        tax_policy_version: null,
+        tax_policy_approved_at: null,
+        tax_policy_approved_by: null,
+        tax_receipt_mode: "internal",
+      })
+      .eq("id", "00000000-0000-0000-0000-000000000001");
+    assert.ifError(resetTaxPolicy.error);
     const fixedAdminUsername = "__security_admin__";
     const fixedAdminEmail = "security-admin@example.test";
     const { data: previousAdmin } = await service
@@ -304,6 +328,12 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
 
   after(async () => {
     if (!service) return;
+    if (originalTaxSettings) {
+      await service
+        .from("settings")
+        .update(originalTaxSettings)
+        .eq("id", "00000000-0000-0000-0000-000000000001");
+    }
     if (seedClientPaymentId)
       await service.from("credit_payments").delete().eq("id", seedClientPaymentId);
     if (seedSupplierPaymentId)

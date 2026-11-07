@@ -21,7 +21,11 @@ export type EmployeeCreation = EmployeeInvitation & {
 
 export type EmployeeInvitationErrors = Partial<Record<keyof EmployeeInvitation, string>>;
 
-export function getEmployeeAccountStatus(active: unknown): EmployeeAccountStatus;
+export function getEmployeeAccountStatus(
+  active: unknown,
+  passwordChangeRequired?: unknown,
+  emailConfirmed?: unknown,
+): EmployeeAccountStatus;
 export function validateEmployeeInvitation(
   input: Partial<EmployeeInvitation>,
 ): EmployeeInvitationErrors;

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useAuth,
   PERMISSIONS,
@@ -307,7 +307,9 @@ function TeamPage() {
           {users.map((employee) => {
             const isSelf = employee.username.toLowerCase() === user?.username.toLowerCase();
             const isAdmin = employee.role === "admin";
-            const status = getEmployeeAccountStatus(employee.active);
+            const status = employee.passwordChangeRequired
+              ? getEmployeeAccountStatus(false, true)
+              : getEmployeeAccountStatus(employee.active);
             return (
               <article
                 key={employee.username}
@@ -482,6 +484,12 @@ function EmployeeContactEditor({
   const [error, setError] = useState<string | null>(null);
   const unchanged = name === employee.name && phone === (employee.phone ?? "");
 
+  useEffect(() => {
+    setName(employee.name);
+    setPhone(employee.phone ?? "");
+    setError(null);
+  }, [employee.name, employee.phone]);
+
   return (
     <form
       className="mb-4 grid gap-3 sm:grid-cols-2"
@@ -494,7 +502,7 @@ function EmployeeContactEditor({
         }
         setError(null);
         const saved = await onSave({ name: name.trim(), phone: phone.trim() || null });
-        if (!saved) setError("No se confirmó el cambio. Revisa el estado antes de repetir.");
+        if (!saved) setError("Resultado no confirmado. Actualiza la lista antes de repetir.");
       }}
     >
       <div className="space-y-1.5">

@@ -47,6 +47,46 @@ function inviteRedirectUrl(path = "/reset-password") {
   return new URL(path, origin).toString();
 }
 
+function provisioningPrerequisites(): { ok: true } | { ok: false; reason: string } {
+  if (!provisioningEnabled) {
+    return { ok: false, reason: "Las invitaciones no están habilitadas en este entorno." };
+  }
+  try {
+    const configuredOrigin = Deno.env.get("APP_PUBLIC_ORIGIN")?.trim();
+    const localRuntime = isLocalTestRuntime();
+    if (!configuredOrigin && !localRuntime) {
+      return { ok: false, reason: "El origen público no está configurado para este entorno." };
+    }
+    const origin = new URL(configuredOrigin ?? "http://127.0.0.1:3000").origin;
+    const configured = (Deno.env.get("APP_ALLOWED_ORIGINS") ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const localOrigin = new Set([
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      "http://localhost:5174",
+      "http://127.0.0.1:5174",
+    ]);
+    if (!localRuntime && !configured.includes(origin)) {
+      return {
+        ok: false,
+        reason: "El origen público no está autorizado para enviar invitaciones.",
+      };
+    }
+    if (localRuntime && !localOrigin.has(origin) && !configured.includes(origin)) {
+      return { ok: false, reason: "El origen local no está autorizado para enviar invitaciones." };
+    }
+    inviteRedirectUrl("/setup-account");
+    inviteRedirectUrl("/reset-password");
+  } catch {
+    return { ok: false, reason: "Las URL de redirección no están configuradas para este entorno." };
+  }
+  return { ok: true };
+}
+
 function validPhone(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const phone = value.trim();
@@ -177,9 +217,10 @@ Deno.serve(async (request: Request) => {
   }
 
   if (input.action === "create_user") {
-    if (!provisioningEnabled)
+    const prerequisites = provisioningPrerequisites();
+    if (!prerequisites.ok)
       return json(request, 503, {
-        error: "La creación de cuentas no está habilitada en este entorno.",
+        error: prerequisites.reason,
       });
     const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
     const name = typeof input.name === "string" ? input.name.trim() : "";
@@ -321,7 +362,7 @@ Deno.serve(async (request: Request) => {
         active: false,
         password_change_required: true,
       })
-      .select("username,name,phone,role,permissions,active")
+      .select("username,name,phone,role,permissions,active,password_change_required")
       .single();
     if (profileError) {
       const incidentId = await compensateCreatedIdentity(
@@ -340,10 +381,10 @@ Deno.serve(async (request: Request) => {
   }
 
   if (input.action === "invite_employee") {
-    if (!provisioningEnabled)
+    const prerequisites = provisioningPrerequisites();
+    if (!prerequisites.ok)
       return json(request, 503, {
-        error:
-          "Employee provisioning is disabled pending verified Cloud email and redirect configuration.",
+        error: prerequisites.reason,
       });
     const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
     const name = typeof input.name === "string" ? input.name.trim() : "";
@@ -406,7 +447,7 @@ Deno.serve(async (request: Request) => {
             : permissions,
         active: false,
       })
-      .select("username,name,role,permissions,active")
+      .select("username,name,role,permissions,active,password_change_required")
       .single();
     if (profileError) {
       const injectCleanupTransportFailure =
@@ -536,7 +577,7 @@ Deno.serve(async (request: Request) => {
       .from("user_profiles")
       .update({ active: false })
       .eq("auth_user_id", target.auth_user_id)
-      .select("username, name, phone, role, permissions, active")
+      .select("username, name, phone, role, permissions, active, password_change_required")
       .maybeSingle();
     if (error) return json(request, 409, { error: "No se pudo revocar el perfil" });
     const { error: banError } = await service.auth.admin.updateUserById(target.auth_user_id, {
@@ -567,7 +608,7 @@ Deno.serve(async (request: Request) => {
       .from("user_profiles")
       .update({ active: true })
       .eq("auth_user_id", target.auth_user_id)
-      .select("username,name,phone,role,permissions,active")
+      .select("username,name,phone,role,permissions,active,password_change_required")
       .maybeSingle();
     if (activateError || !activated)
       return json(request, 409, { error: "No se pudo activar el perfil." });
@@ -646,7 +687,7 @@ Deno.serve(async (request: Request) => {
     .from("user_profiles")
     .update(update)
     .eq("auth_user_id", target.auth_user_id)
-    .select("username, name, phone, role, permissions, active")
+    .select("username, name, phone, role, permissions, active, password_change_required")
     .maybeSingle();
   if (error) return json(request, 409, { error: "No se pudo actualizar el perfil" });
   if (!profile) return json(request, 404, { error: "No se encontró el perfil" });

@@ -2,15 +2,34 @@ const USERNAME_PATTERN = /^[a-z0-9._-]{3,64}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^[+\d\s().-]+$/;
 
-/** @param {unknown} active */
-export function getEmployeeAccountStatus(active) {
-  return active === true
-    ? { label: "Cuenta activa", description: "El acceso está habilitado.", tone: "active" }
-    : {
-        label: "Cuenta inactiva",
-        description: "El correo se verifica en el servidor antes de activar el acceso.",
-        tone: "inactive",
-      };
+/** @param {unknown} active @param {unknown} passwordChangeRequired @param {unknown} emailConfirmed */
+export function getEmployeeAccountStatus(
+  active,
+  passwordChangeRequired = false,
+  emailConfirmed = null,
+) {
+  if (active === true) {
+    return { label: "Cuenta activa", description: "El acceso está habilitado.", tone: "active" };
+  }
+  if (passwordChangeRequired === true) {
+    return {
+      label: "Activación pendiente",
+      description: "La persona debe establecer su contraseña personal antes de activar el acceso.",
+      tone: "inactive",
+    };
+  }
+  if (emailConfirmed === false) {
+    return {
+      label: "Pendiente de correo",
+      description: "La cuenta permanece inactiva hasta confirmar el correo.",
+      tone: "inactive",
+    };
+  }
+  return {
+    label: "Cuenta inactiva",
+    description: "El correo se verifica en el servidor antes de activar el acceso.",
+    tone: "inactive",
+  };
 }
 
 /** @param {{ username?: unknown, name?: unknown, email?: unknown }} input */
@@ -126,6 +145,8 @@ export function employeeActionErrorMessage(error, action) {
     return "La creación de cuentas no está habilitada en este entorno.";
   if (status === 503 && action === "invite")
     return "Las invitaciones no están habilitadas en este entorno.";
+  if (status === 503 && action === "update")
+    return "El servicio no pudo confirmar el cambio. Conserva los datos e inténtalo de nuevo.";
   if (status === 409) {
     if (action === "create")
       return "No se pudo completar el alta. Verifica si la cuenta ya aparece en el listado antes de repetir.";
