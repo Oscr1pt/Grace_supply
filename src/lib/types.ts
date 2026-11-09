@@ -66,6 +66,7 @@ export type SaleLine = {
   name: string;
   unitPrice: number;
   quantity: number;
+  taxClassification?: "gravado" | "exento" | "pendiente";
 };
 
 export type Sale = {
