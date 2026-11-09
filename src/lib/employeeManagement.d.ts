@@ -15,8 +15,6 @@ export type EmployeeInvitation = {
 export type EmployeeCreation = EmployeeInvitation & {
   phone: string;
   role: Role;
-  initialPassword: string;
-  confirmPassword: string;
 };
 
 export type EmployeeInvitationErrors = Partial<Record<keyof EmployeeInvitation, string>>;

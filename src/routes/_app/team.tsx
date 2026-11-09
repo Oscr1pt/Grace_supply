@@ -34,13 +34,10 @@ import {
 import { Trash2, ShieldCheck, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { userPersistenceMessage } from "@/lib/persistence.js";
-import { getEmployeeAccountStatus, validateEmployeeInvitation } from "@/lib/employeeManagement.js";
+import { getEmployeeAccountStatus } from "@/lib/employeeManagement.js";
 
 export const Route = createFileRoute("/_app/team")({ component: TeamPage });
 
-const employeeProvisioningEnabled = import.meta.env.VITE_ACCOUNT_PROVISIONING_ENABLED === "true";
-type Invitation = { username: string; name: string; email: string };
-type InvitationErrors = Partial<Record<keyof Invitation, string>>;
 type SecurityAction =
   | { kind: "activate"; target: User }
   | { kind: "role"; target: User; role: Role }
@@ -55,14 +52,11 @@ function TeamPage() {
     refreshUsers,
     updateEmployee,
     removeEmployee,
-    inviteEmployee,
     activateEmployee,
   } = useAuth();
   const actionLock = useRef(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [securityAction, setSecurityAction] = useState<SecurityAction | null>(null);
-  const [invite, setInvite] = useState<Invitation>({ username: "", name: "", email: "" });
-  const [inviteErrors, setInviteErrors] = useState<InvitationErrors>({});
 
   const runAction = async (key: string, operation: () => Promise<void>) => {
     if (actionLock.current) return false;
@@ -78,30 +72,6 @@ function TeamPage() {
       actionLock.current = false;
       setPendingAction(null);
     }
-  };
-
-  const submitInvite = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const errors = validateEmployeeInvitation(invite);
-    setInviteErrors(errors);
-    const firstInvalid = (Object.keys(errors) as (keyof Invitation)[])[0];
-    if (firstInvalid) {
-      document.getElementById(`employee-${firstInvalid}`)?.focus();
-      return;
-    }
-    const confirmed = await runAction("invite", async () => {
-      await inviteEmployee({
-        username: invite.username.trim(),
-        name: invite.name.trim(),
-        email: invite.email.trim(),
-      });
-      toast.success(
-        "Invitación registrada. La cuenta permanece inactiva hasta verificar el correo y activar el acceso.",
-      );
-      setInvite({ username: "", name: "", email: "" });
-      setInviteErrors({});
-    });
-    if (!confirmed) return;
   };
 
   const togglePermission = (target: User, permission: Permission) => {
@@ -174,108 +144,13 @@ function TeamPage() {
         Crear usuario
       </a>
 
-      {employeeProvisioningEnabled ? (
-        <form
-          onSubmit={submitInvite}
-          noValidate
-          aria-busy={pendingAction === "invite"}
-          className="mb-6 grid gap-4 rounded-lg border border-border bg-card p-4 sm:p-5 md:grid-cols-3"
-        >
-          <div className="space-y-1.5">
-            <Label htmlFor="employee-username">Usuario</Label>
-            <Input
-              id="employee-username"
-              autoComplete="off"
-              maxLength={64}
-              value={invite.username}
-              aria-invalid={Boolean(inviteErrors.username)}
-              aria-describedby={
-                inviteErrors.username ? "employee-username-error" : "employee-username-hint"
-              }
-              onChange={(event) => {
-                setInvite({ ...invite, username: event.target.value });
-                setInviteErrors((current) => ({ ...current, username: undefined }));
-              }}
-            />
-            <p id="employee-username-hint" className="text-xs text-muted-foreground">
-              De 3 a 64 letras, números, puntos, guiones o guiones bajos.
-            </p>
-            {inviteErrors.username && (
-              <p id="employee-username-error" role="alert" className="text-xs text-destructive">
-                {inviteErrors.username}
-              </p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="employee-name">Nombre</Label>
-            <Input
-              id="employee-name"
-              autoComplete="name"
-              maxLength={120}
-              value={invite.name}
-              aria-invalid={Boolean(inviteErrors.name)}
-              aria-describedby={inviteErrors.name ? "employee-name-error" : undefined}
-              onChange={(event) => {
-                setInvite({ ...invite, name: event.target.value });
-                setInviteErrors((current) => ({ ...current, name: undefined }));
-              }}
-            />
-            {inviteErrors.name && (
-              <p id="employee-name-error" role="alert" className="text-xs text-destructive">
-                {inviteErrors.name}
-              </p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="employee-email">Correo individual</Label>
-            <Input
-              id="employee-email"
-              type="email"
-              autoComplete="email"
-              value={invite.email}
-              aria-invalid={Boolean(inviteErrors.email)}
-              aria-describedby={inviteErrors.email ? "employee-email-error" : undefined}
-              onChange={(event) => {
-                setInvite({ ...invite, email: event.target.value });
-                setInviteErrors((current) => ({ ...current, email: undefined }));
-              }}
-            />
-            {inviteErrors.email && (
-              <p id="employee-email-error" role="alert" className="text-xs text-destructive">
-                {inviteErrors.email}
-              </p>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground md:col-span-2">
-            La invitación crea un perfil inactivo con permisos iniciales de ventas. No confirma la
-            entrega del correo ni activa el acceso.
-          </p>
-          <Button
-            type="submit"
-            disabled={Boolean(pendingAction)}
-            className="w-full bg-[#D4AF37] text-black hover:bg-[#E5C158] md:self-end"
-          >
-            {pendingAction === "invite" ? "Enviando invitación…" : "Invitar empleado"}
-          </Button>
-          {pendingAction === "invite" && (
-            <p
-              role="status"
-              aria-live="polite"
-              className="text-sm text-muted-foreground md:col-span-3"
-            >
-              Esperando confirmación del servidor…
-            </p>
-          )}
-        </form>
-      ) : (
-        <div
-          role="note"
-          className="mb-6 rounded-lg border border-[#D4AF37]/30 bg-[#D4AF37]/[0.06] px-4 py-3 text-sm text-muted-foreground"
-        >
-          Las invitaciones están deshabilitadas hasta verificar el correo transaccional y las URL de
-          este entorno. No hay registro público ni creación de administradores por invitación.
-        </div>
-      )}
+      <div
+        role="note"
+        className="mb-6 rounded-lg border border-[#D4AF37]/30 bg-[#D4AF37]/[0.06] px-4 py-3 text-sm text-muted-foreground"
+      >
+        Usa «Crear usuario» para generar un enlace temporal privado. No se envían invitaciones por
+        correo y el acceso permanece inactivo hasta configurar la contraseña y activar la cuenta.
+      </div>
 
       {usersStatus === "loading" ? (
         <div role="status" aria-live="polite" className="space-y-3">

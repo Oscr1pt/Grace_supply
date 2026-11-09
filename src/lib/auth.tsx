@@ -76,11 +76,9 @@ type AuthCtx = {
     email: string;
     phone: string;
     role: Role;
-    initialPassword: string;
     confirmAdminCreation?: boolean;
-  }) => Promise<void>;
+  }) => Promise<{ setupUrl: string }>;
   removeEmployee: (username: string) => Promise<void>;
-  inviteEmployee: (input: { username: string; name: string; email: string }) => Promise<void>;
   activateEmployee: (username: string) => Promise<void>;
 };
 
@@ -574,24 +572,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: string;
       phone: string;
       role: Role;
-      initialPassword: string;
       confirmAdminCreation?: boolean;
     }) => {
-      const { data, error } = await supabase.functions.invoke<{ profile: ProfileRow }>(
-        "manage-profile",
-        {
-          body: {
-            action: "create_user",
-            username: input.username,
-            name: input.name,
-            email: input.email,
-            phone: input.phone,
-            role: input.role,
-            initial_password: input.initialPassword,
-            ...(input.confirmAdminCreation ? { confirm_admin_creation: true } : {}),
-          },
+      const { data, error } = await supabase.functions.invoke<{
+        profile: ProfileRow;
+        setup_url?: string;
+      }>("manage-profile", {
+        body: {
+          action: "create_user",
+          username: input.username,
+          name: input.name,
+          email: input.email,
+          phone: input.phone,
+          role: input.role,
+          ...(input.confirmAdminCreation ? { confirm_admin_creation: true } : {}),
         },
-      );
+      });
       if (error) throw new Error(employeeActionErrorMessage(error, "create"));
       requireConfirmedEmployeeProfile(data, input.username, {
         active: false,
@@ -599,8 +595,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         phone: input.phone,
         role: input.role,
       });
+      if (!data?.setup_url) throw new Error("El servidor no devolvió un enlace de configuración.");
       await refreshUsers();
       announceInvalidation();
+      return { setupUrl: data.setup_url };
     },
     [announceInvalidation, refreshUsers],
   );
@@ -620,26 +618,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (username === user?.username) await revalidateSession(true);
     },
     [announceInvalidation, refreshUsers, revalidateSession, user?.username],
-  );
-
-  const inviteEmployee = useCallback(
-    async (input: { username: string; name: string; email: string }) => {
-      const { data, error } = await supabase.functions.invoke<{ profile: ProfileRow }>(
-        "manage-profile",
-        {
-          body: { action: "invite_employee", ...input, permissions: DEFAULT_EMPLOYEE_PERMISSIONS },
-        },
-      );
-      if (error) throw new Error(employeeActionErrorMessage(error, "invite"));
-      requireConfirmedEmployeeProfile(data, input.username, {
-        active: false,
-        role: "employee",
-        permissions: DEFAULT_EMPLOYEE_PERMISSIONS,
-      });
-      await refreshUsers();
-      announceInvalidation();
-    },
-    [announceInvalidation, refreshUsers],
   );
 
   const activateEmployee = useCallback(
@@ -704,7 +682,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateEmployee,
         createEmployee,
         removeEmployee,
-        inviteEmployee,
         activateEmployee,
       }}
     >

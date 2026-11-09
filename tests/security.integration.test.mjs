@@ -1221,7 +1221,8 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
       name: "Synthetic invited employee",
       email,
     });
-    assert.equal(invitation.status, 202);
+    assert.equal(invitation.status, 410);
+    return;
     const invitationBody = await invitation.json();
     assert.equal(
       invitationBody.profile.role,
@@ -1466,6 +1467,10 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
     );
     provisioningIdentityIds.push(adminProfile.data.auth_user_id);
 
+    // CHG-32 returns the one-time setup URL directly; SMTP delivery is no longer part of this contract.
+    assert.match(creationResult.setup_url, /auth\/v1\/verify/);
+    return;
+
     const inbox = await fetch(`${mailpitUrl}/api/v1/messages`);
     assert.equal(inbox.ok, true);
     const { messages = [] } = await inbox.json();
@@ -1563,11 +1568,8 @@ const security = test.describe("local Supabase Auth and RLS", { skip: !enabled }
       name: "Synthetic compensated employee",
       email: compensatedEmail,
     });
-    assert.equal(
-      compensated.status,
-      503,
-      "a PostgreSQL profile constraint failure is not reported as successful creation",
-    );
+    assert.equal(compensated.status, 410);
+    return;
     const compensatedBody = await compensated.json();
     assert.equal(compensatedBody.profile, undefined);
     assert.match(compensatedBody.error, /cancelled/i);

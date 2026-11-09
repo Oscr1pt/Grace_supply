@@ -50,12 +50,10 @@ export function validateEmployeeInvitation(input) {
   return errors;
 }
 
-/** @param {{ username?: unknown, name?: unknown, email?: unknown, phone?: unknown, role?: unknown, initialPassword?: unknown, confirmPassword?: unknown }} input */
+/** @param {{ username?: unknown, name?: unknown, email?: unknown, phone?: unknown, role?: unknown }} input */
 export function validateEmployeeCreation(input) {
   const errors = validateEmployeeInvitation(input);
   const phone = typeof input.phone === "string" ? input.phone.trim() : "";
-  const initialPassword = typeof input.initialPassword === "string" ? input.initialPassword : "";
-  const confirmPassword = typeof input.confirmPassword === "string" ? input.confirmPassword : "";
 
   if (!phone) errors.phone = "Escribe el teléfono de la persona.";
   else if (
@@ -68,12 +66,6 @@ export function validateEmployeeCreation(input) {
   }
   if (input.role !== "admin" && input.role !== "employee") {
     errors.role = "Selecciona un rol válido.";
-  }
-  if (initialPassword.length < 12) {
-    errors.initialPassword = "La contraseña inicial debe tener al menos 12 caracteres.";
-  }
-  if (initialPassword !== confirmPassword) {
-    errors.confirmPassword = "Las contraseñas no coinciden.";
   }
   return errors;
 }

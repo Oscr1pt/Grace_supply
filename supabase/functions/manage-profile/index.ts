@@ -25,7 +25,7 @@ function localFaultEnabled(name: string) {
   return isLocalTestRuntime() && Deno.env.get(name) === "true";
 }
 
-function inviteRedirectUrl(path = "/reset-password") {
+function inviteRedirectUrl(path = "/setup-account") {
   const configuredOrigin = Deno.env.get("APP_PUBLIC_ORIGIN") ?? "http://127.0.0.1:3000";
   const configured = (Deno.env.get("APP_ALLOWED_ORIGINS") ?? "")
     .split(",")
@@ -80,7 +80,6 @@ function provisioningPrerequisites(): { ok: true } | { ok: false; reason: string
       return { ok: false, reason: "El origen local no está autorizado para enviar invitaciones." };
     }
     inviteRedirectUrl("/setup-account");
-    inviteRedirectUrl("/reset-password");
   } catch {
     return { ok: false, reason: "Las URL de redirección no están configuradas para este entorno." };
   }
@@ -158,6 +157,13 @@ async function hasProfileForIdentity(authUserId: string) {
   return data !== null;
 }
 
+function ephemeralPassword() {
+  // Keep the server-only credential below GoTrue's 72-character limit.
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return `Ephemeral-${Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")}-Aa1!`;
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") return json(request, 204, {});
   if (request.method !== "POST") return json(request, 405, { error: "Método no permitido" });
@@ -191,7 +197,6 @@ Deno.serve(async (request: Request) => {
     phone?: unknown;
     role?: unknown;
     permissions?: unknown;
-    initial_password?: unknown;
     confirm_admin_creation?: unknown;
     incident_id?: unknown;
   };
@@ -202,16 +207,17 @@ Deno.serve(async (request: Request) => {
   }
 
   const username = normalizeUsername(input.username);
+  if (input.action === "invite_employee") {
+    return json(request, 410, {
+      error:
+        "El flujo de invitación automática fue retirado. Usa Crear usuario para generar un enlace privado.",
+    });
+  }
   if (
     !username ||
-    ![
-      "create_user",
-      "update",
-      "revoke",
-      "invite_employee",
-      "activate",
-      "resolve_provisioning_incident",
-    ].includes(String(input.action))
+    !["create_user", "update", "revoke", "activate", "resolve_provisioning_incident"].includes(
+      String(input.action),
+    )
   ) {
     return json(request, 400, { error: "Solicitud inválida" });
   }
@@ -226,18 +232,15 @@ Deno.serve(async (request: Request) => {
     const name = typeof input.name === "string" ? input.name.trim() : "";
     const phone = typeof input.phone === "string" ? input.phone.trim() : "";
     const role = input.role === "admin" || input.role === "employee" ? input.role : null;
-    const initialPassword =
-      typeof input.initial_password === "string" ? input.initial_password : "";
     if (
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
       !name ||
       name.length > 120 ||
       !validPhone(phone) ||
-      !role ||
-      initialPassword.length < 12
+      !role
     ) {
       return json(request, 400, {
-        error: "Revisa el nombre, usuario, correo, teléfono, rol y contraseña inicial.",
+        error: "Revisa el nombre, usuario, correo, teléfono y rol.",
       });
     }
     if (role === "admin" && input.confirm_admin_creation !== true) {
@@ -280,18 +283,20 @@ Deno.serve(async (request: Request) => {
     }
     const { data: createdIdentity, error: createError } = await service.auth.admin.createUser({
       email,
-      password: initialPassword,
+      password: ephemeralPassword(),
       email_confirm: false,
     });
     if (createError || !createdIdentity.user)
       return json(request, 409, {
         error: "No se pudo completar el alta. Verifica los datos de la cuenta.",
       });
-    const { data: invitation, error: inviteError } = await service.auth.admin.inviteUserByEmail(
+    const { data: generated, error: linkError } = await service.auth.admin.generateLink({
+      type: "invite",
       email,
-      { redirectTo },
-    );
-    if (inviteError || !invitation.user) {
+      options: { redirectTo },
+    });
+    const setupUrl = generated?.properties?.action_link;
+    if (linkError || !setupUrl) {
       const incidentId = await compensateCreatedIdentity(
         createdIdentity.user.id,
         username,
@@ -300,25 +305,12 @@ Deno.serve(async (request: Request) => {
       return json(request, incidentId ? 503 : 409, {
         error: incidentId
           ? "La cuenta requiere revisión administrativa antes de activarse."
-          : "No se pudo completar la invitación y la identidad fue cancelada.",
-        ...(incidentId ? { incidentId } : {}),
-      });
-    }
-    if (invitation.user.id !== createdIdentity.user.id) {
-      const incidentId = await compensateCreatedIdentity(
-        createdIdentity.user.id,
-        username,
-        identity.user.id,
-      );
-      return json(request, incidentId ? 503 : 409, {
-        error: incidentId
-          ? "La cuenta requiere revisión administrativa antes de activarse."
-          : "La identidad de la invitación no coincide con el alta solicitada.",
+          : "No se pudo generar el enlace seguro y la identidad fue cancelada.",
         ...(incidentId ? { incidentId } : {}),
       });
     }
     try {
-      if (await hasProfileForIdentity(invitation.user.id))
+      if (await hasProfileForIdentity(createdIdentity.user.id))
         return json(request, 409, { error: "El correo ya está asociado a una cuenta." });
     } catch {
       return json(request, 503, { error: "No se pudo verificar la identidad de la cuenta." });
@@ -353,7 +345,7 @@ Deno.serve(async (request: Request) => {
     const { data: profile, error: profileError } = await service
       .from("user_profiles")
       .insert({
-        auth_user_id: invitation.user.id,
+        auth_user_id: createdIdentity.user.id,
         username: username.trim(),
         name,
         phone,
@@ -366,7 +358,7 @@ Deno.serve(async (request: Request) => {
       .single();
     if (profileError) {
       const incidentId = await compensateCreatedIdentity(
-        invitation.user.id,
+        createdIdentity.user.id,
         username,
         identity.user.id,
       );
@@ -377,7 +369,7 @@ Deno.serve(async (request: Request) => {
         ...(incidentId ? { incidentId } : {}),
       });
     }
-    return json(request, 202, { profile });
+    return json(request, 202, { profile, setup_url: setupUrl });
   }
 
   if (input.action === "invite_employee") {

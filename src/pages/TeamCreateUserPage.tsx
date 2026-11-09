@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Eye, EyeOff } from "lucide-react";
 import { useAuth, type Role } from "@/lib/auth";
 import { validateEmployeeCreation } from "@/lib/employeeManagement.js";
 import { Button } from "@/components/ui/button";
@@ -32,8 +31,6 @@ type CreationForm = {
   phone: string;
   email: string;
   role: Role;
-  initialPassword: string;
-  confirmPassword: string;
 };
 
 const emptyForm: CreationForm = {
@@ -42,8 +39,6 @@ const emptyForm: CreationForm = {
   phone: "",
   email: "",
   role: "employee",
-  initialPassword: "",
-  confirmPassword: "",
 };
 
 export function TeamCreateUserPage() {
@@ -53,15 +48,16 @@ export function TeamCreateUserPage() {
   const [errors, setErrors] = useState<Partial<Record<keyof CreationForm, string>>>({});
   const [busy, setBusy] = useState(false);
   const [confirmAdmin, setConfirmAdmin] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [setupUrl, setSetupUrl] = useState<string | null>(null);
 
   const update = <K extends keyof CreationForm>(field: K, value: CreationForm[K]) => {
     setForm((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
     setRequestError(null);
     setSuccess(false);
+    setSetupUrl(null);
   };
 
   const submit = (event: React.FormEvent) => {
@@ -87,17 +83,17 @@ export function TeamCreateUserPage() {
     setBusy(true);
     setRequestError(null);
     try {
-      await createEmployee({
+      const result = await createEmployee({
         username: form.username.trim(),
         name: form.name.trim(),
         phone: form.phone.trim(),
         email: form.email.trim().toLowerCase(),
         role: form.role,
-        initialPassword: form.initialPassword,
         confirmAdminCreation,
       });
       setForm(emptyForm);
       setErrors({});
+      setSetupUrl(result.setupUrl);
       setSuccess(true);
     } catch (error) {
       setRequestError(
@@ -141,8 +137,8 @@ export function TeamCreateUserPage() {
         </Link>
         <h1 className="font-display text-3xl">Crear usuario</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
-          La cuenta queda inactiva. La persona debe confirmar su correo y reemplazar la contraseña
-          inicial antes de que un administrador pueda activar el acceso.
+          La cuenta queda inactiva. Entrega personalmente el enlace temporal a la persona
+          identificada; deberá configurar su contraseña antes de la activación administrativa.
         </p>
       </header>
 
@@ -225,58 +221,6 @@ export function TeamCreateUserPage() {
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="new-user-initialPassword">Contraseña inicial</Label>
-            <div className="relative">
-              <Input
-                id="new-user-initialPassword"
-                type={showPassword ? "text" : "password"}
-                autoComplete="new-password"
-                minLength={12}
-                value={form.initialPassword}
-                aria-invalid={Boolean(errors.initialPassword)}
-                aria-describedby={
-                  errors.initialPassword ? "new-user-password-error" : "new-user-password-hint"
-                }
-                onChange={(event) => update("initialPassword", event.target.value)}
-              />
-              <button
-                type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={
-                  showPassword ? "Ocultar contraseña inicial" : "Mostrar contraseña inicial"
-                }
-                aria-pressed={showPassword}
-                onClick={() => setShowPassword((visible) => !visible)}
-              >
-                {showPassword ? (
-                  <EyeOff className="h-4 w-4" aria-hidden="true" />
-                ) : (
-                  <Eye className="h-4 w-4" aria-hidden="true" />
-                )}
-              </button>
-            </div>
-            <p id="new-user-password-hint" className="text-xs text-muted-foreground">
-              Al menos 12 caracteres. Solo se envía por la solicitud segura a Supabase Auth; no se
-              guarda en el perfil.
-            </p>
-            {errors.initialPassword && (
-              <p id="new-user-password-error" role="alert" className="text-sm text-destructive">
-                {errors.initialPassword}
-              </p>
-            )}
-          </div>
-
-          <Field
-            id="confirmPassword"
-            label="Confirmar contraseña inicial"
-            value={form.confirmPassword}
-            error={errors.confirmPassword}
-            onChange={(value) => update("confirmPassword", value)}
-            type="password"
-            autoComplete="new-password"
-          />
-
           {requestError && (
             <p
               role="alert"
@@ -286,14 +230,36 @@ export function TeamCreateUserPage() {
             </p>
           )}
           {success && (
-            <p
+            <div
               role="status"
               aria-live="polite"
               className="rounded-md border border-emerald-600/30 bg-emerald-600/5 p-3 text-sm md:col-span-2"
             >
-              El perfil quedó creado e inactivo. La solicitud fue aceptada por el servidor; esto no
-              confirma la entrega del correo ni activa el acceso.
-            </p>
+              <p>
+                El perfil quedó creado e inactivo. Entrega este enlace una sola vez por un canal
+                privado:
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <Input
+                  aria-label="Enlace temporal de configuración"
+                  value={setupUrl ?? ""}
+                  readOnly
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (setupUrl) void navigator.clipboard?.writeText(setupUrl);
+                  }}
+                >
+                  Copiar enlace
+                </Button>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Es una credencial temporal. No se guarda en el sistema ni confirma por sí sola la
+                identidad del correo.
+              </p>
+            </div>
           )}
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end md:col-span-2">
             <Link

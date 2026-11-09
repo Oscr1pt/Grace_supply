@@ -78,7 +78,7 @@ test("invitation validation uses the server's username and name limits", () => {
   );
 });
 
-test("administrative account creation validates phone and temporary password without persisting either", () => {
+test("administrative account creation validates contact fields without collecting a password", () => {
   assert.deepEqual(
     validateEmployeeCreation({
       username: "Ana-01",
@@ -86,8 +86,6 @@ test("administrative account creation validates phone and temporary password wit
       email: "ana@example.test",
       phone: "+1 (809) 555-0132",
       role: "employee",
-      initialPassword: "Secure-initial-9!",
-      confirmPassword: "Secure-initial-9!",
     }),
     {},
   );
@@ -98,8 +96,6 @@ test("administrative account creation validates phone and temporary password wit
       email: "not-an-email",
       phone: "12-34",
       role: "owner",
-      initialPassword: "short",
-      confirmPassword: "different",
     }),
     {
       username: "Usa entre 3 y 64 letras, números, puntos, guiones o guiones bajos.",
@@ -107,8 +103,6 @@ test("administrative account creation validates phone and temporary password wit
       email: "Escribe un correo válido.",
       phone: "Escribe un teléfono válido con entre 7 y 15 dígitos.",
       role: "Selecciona un rol válido.",
-      initialPassword: "La contraseña inicial debe tener al menos 12 caracteres.",
-      confirmPassword: "Las contraseñas no coinciden.",
     },
   );
 });

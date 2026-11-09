@@ -4,7 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 const url = process.env.LOCAL_SUPABASE_URL;
 const anonKey = process.env.LOCAL_SUPABASE_ANON_KEY;
 const serviceKey = process.env.LOCAL_SUPABASE_SERVICE_ROLE_KEY;
-const mailpitUrl = process.env.LOCAL_MAILPIT_URL;
 const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
 const adminUsername = `chg22_admin_${suffix}`;
 const adminEmail = `chg22-admin-${suffix}@example.test`;
@@ -16,13 +15,11 @@ test.describe("CHG-22 secure user creation", () => {
   test.setTimeout(90000);
 
   test.beforeAll(async () => {
-    if (!url || !anonKey || !serviceKey || !mailpitUrl) {
-      throw new Error("A disposable local Supabase project and Mailpit are required");
+    if (!url || !anonKey || !serviceKey) {
+      throw new Error("A disposable local Supabase project is required");
     }
     if (
-      ![url, mailpitUrl].every((value) =>
-        ["localhost", "127.0.0.1", "::1"].includes(new URL(value).hostname),
-      )
+      ![url].every((value) => ["localhost", "127.0.0.1", "::1"].includes(new URL(value).hostname))
     ) {
       throw new Error("CHG-22 browser tests refuse non-local services");
     }
@@ -81,7 +78,6 @@ test.describe("CHG-22 secure user creation", () => {
   }) => {
     const username = `chg22_employee_${suffix}`;
     const email = `chg22-employee-${suffix}@example.test`;
-    const initialPassword = `Initial-${crypto.randomUUID()}-Bb2!`;
     const newPassword = `Personal-${crypto.randomUUID()}-Cc3!`;
 
     await page.setViewportSize({ width: 320, height: 820 });
@@ -118,20 +114,16 @@ test.describe("CHG-22 secure user creation", () => {
     await page.getByLabel("Nombre", { exact: true }).fill("Synthetic CHG-22 employee");
     await page.getByLabel("Teléfono individual").fill("1234");
     await page.getByLabel("Correo individual").fill(email);
-    await page.getByLabel("Contraseña inicial", { exact: true }).fill(initialPassword);
-    await page
-      .getByLabel("Confirmar contraseña inicial", { exact: true })
-      .fill("Mismatch-Password-123!");
     await page.getByRole("button", { name: "Crear cuenta" }).click();
     await expect(
       page.getByText("Escribe un teléfono válido con entre 7 y 15 dígitos."),
     ).toBeVisible();
-    await expect(page.getByText("Las contraseñas no coinciden.")).toBeVisible();
     await expect(page.getByLabel("Teléfono individual")).toBeFocused();
     await page.getByLabel("Teléfono individual").fill("+1 (809) 555-0188");
-    await page.getByLabel("Confirmar contraseña inicial", { exact: true }).fill(initialPassword);
     await page.getByRole("button", { name: "Crear cuenta" }).click();
     await expect(page.getByRole("status")).toContainText(/perfil quedó creado e inactivo/i);
+    const setupUrl = await page.getByLabel("Enlace temporal de configuración").inputValue();
+    expect(setupUrl).toMatch(/^https?:\/\//);
 
     const saved = await service
       .from("user_profiles")
@@ -146,38 +138,10 @@ test.describe("CHG-22 secure user creation", () => {
       role: "employee",
     });
 
-    let inviteLink;
-    const deadline = Date.now() + 15000;
-    while (!inviteLink && Date.now() < deadline) {
-      const inbox = await fetch(`${mailpitUrl}/api/v1/messages`);
-      expect(inbox.ok).toBeTruthy();
-      const { messages = [] } = await inbox.json();
-      for (const message of messages.filter((item) =>
-        item.To?.some((recipient) => recipient.Address === email),
-      )) {
-        const id = message.ID ?? message.Id ?? message.id;
-        const detail = await fetch(`${mailpitUrl}/api/v1/message/${encodeURIComponent(id)}`);
-        expect(detail.ok).toBeTruthy();
-        const body = await detail.json();
-        for (const content of [body.Text, body.HTML]) {
-          if (typeof content !== "string") continue;
-          for (const match of content.matchAll(/https?:\/\/[^\s"<>]+/g)) {
-            const candidate = new URL(match[0].replaceAll("&amp;", "&"));
-            if (
-              candidate.pathname === "/auth/v1/verify" &&
-              candidate.searchParams.get("type") === "invite"
-            )
-              inviteLink = candidate;
-          }
-        }
-      }
-      if (!inviteLink) await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    expect(inviteLink).toBeTruthy();
     const recipientContext = await browser.newContext();
     const recipientPage = await recipientContext.newPage();
     try {
-      await recipientPage.goto(inviteLink.toString());
+      await recipientPage.goto(setupUrl);
       await expect(recipientPage).toHaveURL(/\/setup-account/);
       await expect(
         recipientPage.getByRole("heading", { name: "Configura tu cuenta" }),
@@ -201,7 +165,6 @@ test.describe("CHG-22 secure user creation", () => {
           .map(([key, value]) => `${key}=${value}`)
           .join("\n"),
       );
-      expect(browserStorage).not.toContain(initialPassword);
       expect(browserStorage).not.toContain(newPassword);
       await expect
         .poll(() =>
