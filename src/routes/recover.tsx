@@ -94,8 +94,8 @@ function RecoverPage() {
             role="status"
             className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-neutral-300"
           >
-            La recuperación se habilitará tras verificar el correo transaccional y las URL del
-            entorno. Cada cuenta habilitada requiere un correo individual verificado.
+            La recuperación automática por correo está deshabilitada. Solicita a un administrador un
+            enlace privado desde Empleados.
           </p>
         )}
         <Link

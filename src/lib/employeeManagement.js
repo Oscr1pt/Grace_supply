@@ -122,7 +122,7 @@ export function requireConfirmedEmployeeProfile(result, username, expected = {})
   return profile;
 }
 
-/** @param {unknown} error @param {"invite"|"activate"|"update"|"revoke"} action */
+/** @param {unknown} error @param {"invite"|"activate"|"update"|"revoke"|"recovery"|"list"} action */
 export function employeeActionErrorMessage(error, action) {
   const status =
     error && typeof error === "object" && "context" in error && error.context instanceof Response
@@ -139,6 +139,10 @@ export function employeeActionErrorMessage(error, action) {
     return "Las invitaciones no están habilitadas en este entorno.";
   if (status === 503 && action === "update")
     return "El servicio no pudo confirmar el cambio. Conserva los datos e inténtalo de nuevo.";
+  if (status === 503 && action === "recovery")
+    return "No se pudo generar el enlace privado. Verifica el estado de la cuenta e inténtalo de nuevo.";
+  if (status === 503 && action === "list")
+    return "No se pudo cargar la lista de empleados. Intenta actualizarla.";
   if (status === 409) {
     if (action === "create")
       return "No se pudo completar el alta. Verifica si la cuenta ya aparece en el listado antes de repetir.";
@@ -148,6 +152,8 @@ export function employeeActionErrorMessage(error, action) {
       return "El servidor no pudo confirmar la activación. Verifica el estado de la cuenta.";
     if (action === "revoke")
       return "No se pudo confirmar la revocación. Actualiza el estado antes de repetir.";
+    if (action === "recovery")
+      return "La cuenta está revocada o bloqueada. Un administrador debe reactivar el acceso antes de generar un enlace de recuperación.";
     return "No se pudo guardar el cambio. El perfil pudo cambiar en otra sesión.";
   }
   if (error instanceof TypeError || status === 0) {

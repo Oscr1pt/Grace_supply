@@ -5,6 +5,7 @@ export function readAuthCallback(url: string | URL): {
   flowType: AuthCallbackFlow;
   type: string | null;
   hasError: boolean;
+  errorCode: string | null;
 };
 
 export const initialAuthCallback: {
@@ -12,4 +13,5 @@ export const initialAuthCallback: {
   flowType: AuthCallbackFlow;
   type: string | null;
   hasError: boolean;
+  errorCode: string | null;
 };

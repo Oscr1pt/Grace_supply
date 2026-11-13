@@ -84,21 +84,55 @@ test.describe("CHG-21 employee account and access usability", () => {
     await loginButton.click();
     await expect(page).toHaveURL(/\/dashboard(?:$|\?)/, { timeout: 12000 });
     await page.goto("/team");
-    await expect(page.getByRole("heading", { name: "Empleados y permisos" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Empleados" })).toBeVisible();
+  }
+
+  async function waitForManageProfile(page, action, username, status = 200) {
+    const response = await page.waitForResponse(
+      (candidate) => {
+        const request = candidate.request();
+        if (
+          request.method() !== "POST" ||
+          new URL(candidate.url()).pathname !== "/functions/v1/manage-profile"
+        ) {
+          return false;
+        }
+        try {
+          const body = request.postDataJSON();
+          return body.action === action && body.username === username;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 15000 },
+    );
+    expect(response.status()).toBe(status);
+    return response;
   }
 
   test("una sesión vacía se resuelve y la pantalla de empleados muestra estados y errores reales", async ({
     page,
   }) => {
     await signInAsAdmin(page);
-    const pendingCard = page.locator("article").filter({ hasText: `@chg21_pending_${suffix}` });
-    await expect(pendingCard.getByText("Cuenta inactiva")).toBeVisible();
-    await expect(pendingCard).not.toContainText(/pendiente de correo confirmado/i);
-    await expect(pendingCard.getByRole("button", { name: "Activar cuenta" })).toBeVisible();
+    const pendingRow = page.getByRole("row").filter({ hasText: `@chg21_pending_${suffix}` });
+    const pendingIdentity = await service.auth.admin.getUserById(identities[2].id);
+    assertNoError(pendingIdentity.error);
+    const confirmedAt = pendingIdentity.data.user.email_confirmed_at;
+    const expectedStatus = confirmedAt === null ? "Pendiente de correo" : "Cuenta inactiva";
+    await expect(pendingRow.getByText(expectedStatus)).toBeVisible();
+    if (confirmedAt !== null) {
+      await expect(pendingRow.getByText("Pendiente de correo")).toHaveCount(0);
+    }
+    await pendingRow.getByRole("button", { name: /ver detalles/i }).click();
+    await expect(
+      page.getByRole("dialog").getByRole("button", { name: "Activar acceso" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
 
     for (const width of [320, 375, 768, 1280]) {
       await page.setViewportSize({ width, height: 900 });
-      await expect(page.getByRole("heading", { name: "Empleados y permisos" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Empleados" })).toBeVisible();
       const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
       expect(scrollWidth, `page should not overflow at ${width}px`).toBeLessThanOrEqual(width);
     }
@@ -108,11 +142,11 @@ test.describe("CHG-21 employee account and access usability", () => {
     page,
   }) => {
     await signInAsAdmin(page);
-    const pendingCard = page.locator("article").filter({ hasText: `@chg21_pending_${suffix}` });
-
-    await pendingCard.getByRole("button", { name: "Activar cuenta" }).click();
+    const pendingRow = page.getByRole("row").filter({ hasText: `@chg21_pending_${suffix}` });
+    await pendingRow.getByRole("button", { name: /ver detalles/i }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Activar acceso" }).click();
     const activationDialog = page.getByRole("alertdialog");
-    await expect(activationDialog).toContainText(/servidor confirma el correo/i);
+    await expect(activationDialog).toContainText(/verificará la configuración de contraseña/i);
     await page.keyboard.press("Escape");
     await expect(activationDialog).toBeHidden();
     const profileBefore = await service
@@ -123,8 +157,16 @@ test.describe("CHG-21 employee account and access usability", () => {
     assertNoError(profileBefore.error);
     expect(profileBefore.data.active).toBe(false);
 
-    await pendingCard.getByRole("button", { name: "Activar cuenta" }).click();
-    await page.getByRole("button", { name: "Confirmar activación" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Activar acceso" }).click();
+    const deniedActivationPromise = waitForManageProfile(
+      page,
+      "activate",
+      `chg21_pending_${suffix}`,
+      409,
+    );
+    await activationDialog.getByRole("button", { name: "Activar acceso" }).click();
+    const deniedActivation = await deniedActivationPromise;
+    expect((await deniedActivation.json()).error).toMatch(/correo confirmado/i);
     await expect(page.getByText(/servidor no pudo confirmar la activación/i)).toBeVisible();
     const profileRejected = await service
       .from("user_profiles")
@@ -149,9 +191,22 @@ test.describe("CHG-21 employee account and access usability", () => {
       .single();
     assertNoError(profileAfterConfirmation.error);
     expect(profileAfterConfirmation.data.active).toBe(false);
-    await pendingCard.getByRole("button", { name: "Activar cuenta" }).click();
-    await page.getByRole("button", { name: "Confirmar activación" }).click();
-    await expect(page.getByText(/servidor confirmó la activación/i)).toBeVisible();
+    await page.getByRole("dialog").getByRole("button", { name: "Activar acceso" }).click();
+    const activatedPromise = waitForManageProfile(page, "activate", `chg21_pending_${suffix}`);
+    await activationDialog.getByRole("button", { name: "Activar acceso" }).click();
+    const activatedResponse = await activatedPromise;
+    expect((await activatedResponse.json()).profile.active).toBe(true);
+    await expect
+      .poll(async () => {
+        const result = await service
+          .from("user_profiles")
+          .select("active")
+          .eq("username", `chg21_pending_${suffix}`)
+          .single();
+        assertNoError(result.error);
+        return result.data.active;
+      })
+      .toBe(true);
     const profileActivated = await service
       .from("user_profiles")
       .select("active")
@@ -159,20 +214,29 @@ test.describe("CHG-21 employee account and access usability", () => {
       .single();
     assertNoError(profileActivated.error);
     expect(profileActivated.data.active).toBe(true);
+    await expect(
+      page
+        .getByRole("row")
+        .filter({ hasText: `@chg21_pending_${suffix}` })
+        .getByText("Cuenta activa"),
+    ).toBeVisible();
   });
 
   test("los cambios de rol y revocación piden confirmación accesible y persisten", async ({
     page,
   }) => {
     await signInAsAdmin(page);
-    const activeCard = page.locator("article").filter({ hasText: `@chg21_active_${suffix}` });
-    const roleSelect = activeCard.getByRole("combobox", { name: /CHG-21 active/i });
+    const activeRow = page.getByRole("row").filter({ hasText: `@chg21_active_${suffix}` });
+    await activeRow.getByRole("button", { name: /ver detalles/i }).click();
+    const employeeDialog = page.getByRole("dialog");
+    const roleSelect = employeeDialog.getByRole("combobox", { name: "Rol" });
 
     await roleSelect.click();
     await page.getByRole("option", { name: "Administrador" }).click();
+    await employeeDialog.getByRole("button", { name: "Guardar cambios" }).click();
     const roleDialog = page.getByRole("alertdialog");
     await expect(
-      roleDialog.getByRole("heading", { name: "¿Dar acceso de administrador?" }),
+      roleDialog.getByRole("heading", { name: "¿Asignar rol administrador?" }),
     ).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(roleDialog).toBeHidden();
@@ -185,9 +249,12 @@ test.describe("CHG-21 employee account and access usability", () => {
     expect(roleUnchanged.data.role).toBe("employee");
 
     await roleSelect.click();
+    await page.getByRole("option", { name: "Empleado" }).click();
+    await roleSelect.click();
     await page.getByRole("option", { name: "Administrador" }).click();
-    await page.getByRole("button", { name: "Confirmar cambio" }).click();
-    await expect(page.getByText(/servidor confirmó el cambio de rol/i)).toBeVisible();
+    await employeeDialog.getByRole("button", { name: "Guardar cambios" }).click();
+    await roleDialog.getByRole("button", { name: "Confirmar cambio" }).click();
+    await expect(page.getByText("Rol y permisos actualizados.")).toBeVisible();
     const rolePersisted = await service
       .from("user_profiles")
       .select("role,permissions")
@@ -197,10 +264,15 @@ test.describe("CHG-21 employee account and access usability", () => {
     expect(rolePersisted.data.role).toBe("admin");
     expect(rolePersisted.data.permissions).toEqual(allPermissions);
 
-    await activeCard.getByRole("button", { name: /revocar acceso/i }).click();
+    const adminRow = page.getByRole("row").filter({ hasText: `@chg21_active_${suffix}` });
+    await adminRow.getByRole("button", { name: /ver detalles/i }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /revocar acceso/i })
+      .click();
     const revokeDialog = page.getByRole("alertdialog");
     await expect(revokeDialog).toContainText(/sus registros se conservarán/i);
-    await page.getByRole("button", { name: "Cancelar" }).click();
+    await revokeDialog.getByRole("button", { name: "Cancelar" }).click();
     const activeAfterCancel = await service
       .from("user_profiles")
       .select("active")
@@ -209,9 +281,26 @@ test.describe("CHG-21 employee account and access usability", () => {
     assertNoError(activeAfterCancel.error);
     expect(activeAfterCancel.data.active).toBe(true);
 
-    await activeCard.getByRole("button", { name: /revocar acceso/i }).click();
-    await page.getByRole("button", { name: "Revocar acceso" }).click();
-    await expect(page.getByText(/servidor confirmó la revocación/i)).toBeVisible();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /revocar acceso/i })
+      .click();
+    const revokePromise = waitForManageProfile(page, "revoke", `chg21_active_${suffix}`);
+    await revokeDialog.getByRole("button", { name: "Revocar acceso" }).click();
+    const revokeResponse = await revokePromise;
+    expect((await revokeResponse.json()).profile.active).toBe(false);
+    await expect(page.getByText("Acceso revocado.")).toBeVisible();
+    await expect
+      .poll(async () => {
+        const result = await service
+          .from("user_profiles")
+          .select("active")
+          .eq("username", `chg21_active_${suffix}`)
+          .single();
+        assertNoError(result.error);
+        return result.data.active;
+      })
+      .toBe(false);
     const revoked = await service
       .from("user_profiles")
       .select("active")
@@ -219,27 +308,31 @@ test.describe("CHG-21 employee account and access usability", () => {
       .single();
     assertNoError(revoked.error);
     expect(revoked.data.active).toBe(false);
+    await expect(
+      page
+        .getByRole("row")
+        .filter({ hasText: `@chg21_active_${suffix}` })
+        .getByText("Cuenta inactiva"),
+    ).toBeVisible();
   });
 
-  test("la recuperación pública mantiene una respuesta genérica para usuarios inexistentes", async ({
+  test("la recuperación pública por correo está deshabilitada y remite al proceso asistido", async ({
     page,
   }) => {
+    const recoveryRequests = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/functions/v1/username-recovery")) {
+        recoveryRequests.push(request.url());
+      }
+    });
     await page.goto("/recover");
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: "Recuperar acceso" })).toBeVisible();
-    await page.getByLabel("Usuario").fill(`no-existe-${suffix}`);
-    await expect(page.getByRole("button", { name: "Enviar instrucciones" })).toBeEnabled();
-    const recoveryResponse = page
-      .waitForResponse(
-        (response) => new URL(response.url()).pathname.endsWith("/functions/v1/username-recovery"),
-        { timeout: 10000 },
-      )
-      .then((response) => ({ status: response.status() }));
-    await page.getByRole("button", { name: "Enviar instrucciones" }).click();
-    expect((await recoveryResponse).status).toBe(202);
-    await expect(page.getByRole("status")).toContainText(/si la cuenta está habilitada/i, {
-      timeout: 12000,
-    });
-    await expect(page.getByRole("status")).not.toContainText(new RegExp(suffix));
+    await expect(page.getByRole("status")).toContainText(
+      /recuperación automática por correo está deshabilitada/i,
+    );
+    await expect(page.getByText(/administrador.*enlace privado/i)).toBeVisible();
+    await expect(page.getByLabel("Usuario")).toHaveCount(0);
+    expect(recoveryRequests).toHaveLength(0);
   });
 });

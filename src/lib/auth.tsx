@@ -80,6 +80,7 @@ type AuthCtx = {
   }) => Promise<{ setupUrl: string }>;
   removeEmployee: (username: string) => Promise<void>;
   activateEmployee: (username: string) => Promise<void>;
+  createEmployeeRecoveryLink: (username: string) => Promise<string>;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -165,20 +166,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const revision = authRevision.current;
     setUsersStatus("loading");
     setUsersError(null);
-    const { data, error } = await supabase
-      .from("user_profiles")
-      .select("username, name, phone, role, permissions, active, password_change_required")
-      .order("username");
-    if (error) {
+    const { data, error } = await supabase.functions.invoke<{ profiles?: ProfileRow[] }>(
+      "manage-profile",
+      { body: { action: "list_employees" } },
+    );
+    if (error || !Array.isArray(data?.profiles)) {
       if (revision !== authRevision.current) return false;
-      const message = userPersistenceMessage(error);
+      const message = error
+        ? employeeActionErrorMessage(error, "list")
+        : "No se pudo confirmar la lista de empleados. Actualízala antes de continuar.";
       setReadFailure("user_profiles", message);
       setUsersError(message);
       setUsersStatus("error");
       return false;
     }
     if (revision !== authRevision.current) return false;
-    setUsers((data ?? []).map((profile) => toPublic(profile as ProfileRow)));
+    setUsers(data.profiles.map((profile) => toPublic(profile)));
     setUsersStatus("ready");
     setReadFailure("user_profiles", null);
     return true;
@@ -296,7 +299,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (initialAuthCallback.present) {
       passwordSetupFlowActive.current = true;
       setPasswordSetupError(
-        initialAuthCallback.hasError ? "El enlace venció, ya fue utilizado o no es válido." : null,
+        initialAuthCallback.errorCode === "user_banned"
+          ? "La cuenta está revocada o bloqueada. Un administrador debe reactivar el acceso antes de cambiar la contraseña."
+          : initialAuthCallback.hasError
+            ? "El enlace venció, ya fue utilizado o no es válido."
+            : null,
       );
       setPasswordSetupStatus(initialAuthCallback.hasError ? "error" : "pending");
     }
@@ -636,6 +643,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [announceInvalidation, refreshUsers],
   );
 
+  const createEmployeeRecoveryLink = useCallback(async (username: string) => {
+    const { data, error } = await supabase.functions.invoke<{ recovery_url?: string }>(
+      "manage-profile",
+      { body: { action: "generate_recovery_link", username } },
+    );
+    if (error) throw new Error(employeeActionErrorMessage(error, "recovery"));
+    if (typeof data?.recovery_url !== "string" || !data.recovery_url) {
+      throw new Error("El servidor no confirmó el enlace de recuperación.");
+    }
+    return data.recovery_url;
+  }, []);
+
   const isAdmin = user?.role === "admin";
   const completePasswordSetup = useCallback(() => {
     setPasswordSetupError(null);
@@ -683,6 +702,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         createEmployee,
         removeEmployee,
         activateEmployee,
+        createEmployeeRecoveryLink,
       }}
     >
       <Fragment key={scopeKey}>{children}</Fragment>

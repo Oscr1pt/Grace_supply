@@ -43,5 +43,5 @@ export function requireConfirmedEmployeeProfile<T = Record<string, unknown>>(
 ): T;
 export function employeeActionErrorMessage(
   error: unknown,
-  action: "create" | "invite" | "activate" | "update" | "revoke",
+  action: "create" | "invite" | "activate" | "update" | "revoke" | "recovery" | "list",
 ): string;

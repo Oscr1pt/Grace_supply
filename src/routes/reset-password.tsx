@@ -98,9 +98,9 @@ function ResetPasswordPage() {
         {passwordSetupStatus === "complete" ? (
           <div className="space-y-3">
             <p role="status" className="text-sm text-neutral-300">
-              La contraseña quedó guardada en Supabase Auth. Esto no activa tu perfil ni concede
-              permisos; vuelve al inicio de sesión después de que el administrador habilite tu
-              cuenta.
+              La contraseña quedó guardada en Supabase Auth. Esto no cambia el estado ni los
+              permisos de la cuenta. Vuelve al inicio de sesión; si tu acceso está inactivo, un
+              administrador deberá activarlo por separado.
             </p>
             {requestError && (
               <p role="alert" className="text-sm text-destructive">
@@ -179,8 +179,12 @@ function ResetPasswordPage() {
         ) : (
           <div className="space-y-3">
             <p role="alert" className="text-sm text-neutral-300">
-              {passwordSetupError ?? "No hay una sesión Auth válida para este enlace."} Un enlace
-              usado, vencido o abierto en otro navegador debe reemplazarse por uno nuevo.
+              {passwordSetupError ?? (
+                <>
+                  No hay una sesión Auth válida para este enlace. Un enlace usado, vencido o abierto
+                  en otro navegador debe reemplazarse por uno nuevo.
+                </>
+              )}
             </p>
             {showRecoveryLink ? (
               <Link
@@ -191,9 +195,9 @@ function ResetPasswordPage() {
               </Link>
             ) : (
               <p className="text-sm text-neutral-400">
-                La recuperación automática está deshabilitada. Solicita al propietario que envíe un
-                enlace de recuperación para la identidad existente desde Supabase Auth; no crees
-                otra cuenta.
+                La recuperación automática por correo está deshabilitada. Solicita a un
+                administrador un enlace privado para esta identidad desde Empleados; no crees otra
+                cuenta.
               </p>
             )}
           </div>

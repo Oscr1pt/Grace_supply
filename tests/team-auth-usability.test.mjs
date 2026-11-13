@@ -10,6 +10,7 @@ import {
 } from "../src/lib/employeeManagement.js";
 
 const teamSource = readFileSync(new URL("../src/routes/_app/team.tsx", import.meta.url), "utf8");
+const authSource = readFileSync(new URL("../src/lib/auth.tsx", import.meta.url), "utf8");
 const loginSource = readFileSync(new URL("../src/routes/login.tsx", import.meta.url), "utf8");
 const recoverySource = readFileSync(new URL("../src/routes/recover.tsx", import.meta.url), "utf8");
 const resetSource = readFileSync(
@@ -36,6 +37,37 @@ const initialPasswordFunction = readFileSync(
 );
 const runtimeRoutes = readFileSync(new URL("../src/router.tsx", import.meta.url), "utf8");
 
+test("team management uses a searchable employee table and a details dialog", () => {
+  assert.match(teamSource, /<table/);
+  assert.match(teamSource, /Buscar empleados/);
+  assert.match(teamSource, /Pendientes de configuración/);
+  assert.match(teamSource, /DialogContent/);
+  assert.match(teamSource, /Guardar cambios/);
+  assert.doesNotMatch(teamSource, /Reconciliar acceso/);
+});
+
+test("employee access action is contextual and initial-password setup blocks activation", () => {
+  assert.match(
+    teamSource,
+    /employee\.active\s*\?\s*\(\s*<Button[\s\S]*?Revocar acceso[\s\S]*?\)\s*:\s*!activationBlocked\s*\?\s*\(/,
+  );
+  assert.match(teamSource, /Revocar acceso/);
+  assert.match(teamSource, /Activar acceso/);
+  assert.doesNotMatch(teamSource, /Reconciliar acceso/);
+  assert.match(teamSource, /passwordChangeRequired/);
+  assert.match(teamSource, /activateEmployee\(action\.target\.username\)/);
+  assert.match(teamSource, /removeEmployee\(action\.target\.username\)/);
+});
+
+test("employee details request an admin-assisted recovery link without persistence", () => {
+  assert.match(teamSource, /Restablecer contraseña/);
+  assert.match(teamSource, /createEmployeeRecoveryLink/);
+  assert.match(authSource, /action: "generate_recovery_link"/);
+  assert.match(teamSource, /navigator\.clipboard\.writeText/);
+  assert.match(teamSource, /recoveryUrl/);
+  assert.match(teamSource, /setRecoveryUrl\(null\)/);
+  assert.doesNotMatch(teamSource, /localStorage|sessionStorage/);
+});
 test("employee inactivity is not presented as unconfirmed email", () => {
   assert.doesNotMatch(
     teamSource,
@@ -44,8 +76,8 @@ test("employee inactivity is not presented as unconfirmed email", () => {
   );
   assert.match(
     teamSource,
-    /getEmployeeAccountStatus\(employee\.active\)/,
-    "display state derived from the active flag only",
+    /getEmployeeAccountStatus\(\s*employee\.active,\s*employee\.passwordChangeRequired,\s*employee\.emailConfirmed,?\s*\)/,
+    "display state reflects active and initial-password status",
   );
 });
 
@@ -56,6 +88,42 @@ test("employee status does not infer email confirmation from inactivity", () => 
     tone: "inactive",
   });
   assert.equal(getEmployeeAccountStatus(true).label, "Cuenta activa");
+  assert.equal(getEmployeeAccountStatus(false, false, null).label, "Cuenta inactiva");
+  assert.equal(getEmployeeAccountStatus(false, false, true).label, "Cuenta inactiva");
+  assert.equal(getEmployeeAccountStatus(false, false, false).label, "Pendiente de correo");
+  assert.equal(getEmployeeAccountStatus(false, true, false).label, "Activaci\u00f3n pendiente");
+});
+
+test("employee directory uses the server authorization route for explicit email status", () => {
+  assert.match(authSource, /functions\.invoke[\s\S]*?list_employees/);
+  assert.doesNotMatch(
+    authSource,
+    /from\("user_profiles"\)\s*\.select\("username, name, phone, role, permissions, active, password_change_required"\)\s*\.order\("username"\)/,
+  );
+});
+
+test("employee directory failures distinguish a permission denial from a service failure", () => {
+  assert.equal(
+    employeeActionErrorMessage({ status: 503 }, "list"),
+    "No se pudo cargar la lista de empleados. Intenta actualizarla.",
+  );
+  assert.equal(
+    employeeActionErrorMessage({ status: 403 }, "list"),
+    "No tienes permiso para administrar esta cuenta.",
+  );
+});
+
+test("recovery links are blocked with actionable feedback for revoked employees", () => {
+  assert.equal(
+    employeeActionErrorMessage({ status: 409 }, "recovery"),
+    "La cuenta está revocada o bloqueada. Un administrador debe reactivar el acceso antes de generar un enlace de recuperación.",
+  );
+});
+
+test("Auth callback distinguishes a banned account from an invalid or expired link", () => {
+  assert.match(authSource, /initialAuthCallback\.errorCode === "user_banned"/);
+  assert.match(authSource, /cuenta está revocada o bloqueada/i);
+  assert.match(resetSource, /passwordSetupError \?\?/);
 });
 
 test("invitation validation uses the server's username and name limits", () => {

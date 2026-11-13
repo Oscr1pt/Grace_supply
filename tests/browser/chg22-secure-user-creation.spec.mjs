@@ -72,6 +72,29 @@ test.describe("CHG-22 secure user creation", () => {
     }
   });
 
+  async function waitForManageProfile(page, action, username, status = 200) {
+    const response = await page.waitForResponse(
+      (candidate) => {
+        const request = candidate.request();
+        if (
+          request.method() !== "POST" ||
+          new URL(candidate.url()).pathname !== "/functions/v1/manage-profile"
+        ) {
+          return false;
+        }
+        try {
+          const body = request.postDataJSON();
+          return body.action === action && body.username === username;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 15000 },
+    );
+    expect(response.status()).toBe(status);
+    return response;
+  }
+
   test("admin creates an inactive account, recipient changes the initial password, then access is activated", async ({
     page,
     browser,
@@ -87,9 +110,16 @@ test.describe("CHG-22 secure user creation", () => {
     await expect(page).toHaveURL(/\/login$/, { timeout: 15_000 });
     await page.getByLabel("Usuario").fill(adminUsername);
     await page.getByLabel("Contraseña").fill(adminPassword);
+    const loginResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/functions/v1/username-login",
+      { timeout: 15_000 },
+    );
     await page.getByRole("button", { name: /entrar al sistema/i }).click();
     try {
-      await expect(page).toHaveURL(/\/dashboard(?:$|\?)/);
+      expect((await loginResponse).status()).toBe(200);
+      await expect.poll(() => new URL(page.url()).pathname, { timeout: 15_000 }).toBe("/dashboard");
     } catch {
       const diagnostic = await page.evaluate(() => ({
         url: location.pathname,
@@ -146,9 +176,18 @@ test.describe("CHG-22 secure user creation", () => {
       await expect(
         recipientPage.getByRole("heading", { name: "Configura tu cuenta" }),
       ).toBeVisible();
+      const passwordCompletion = recipientPage.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/functions/v1/complete-initial-password",
+        { timeout: 20_000 },
+      );
       await recipientPage.getByLabel("Contraseña personal nueva").fill(newPassword);
       await recipientPage.getByLabel("Confirmar contraseña").fill(newPassword);
       await recipientPage.getByRole("button", { name: "Guardar contraseña personal" }).click();
+      const completionResponse = await passwordCompletion;
+      expect(completionResponse.status()).toBe(200);
+      expect(await completionResponse.json()).toMatchObject({ completed: true });
       await expect(recipientPage.getByRole("status")).toContainText(
         /contraseña personal quedó guardada/i,
       );
@@ -178,11 +217,32 @@ test.describe("CHG-22 secure user creation", () => {
     }
 
     await page.goto("/team");
-    const card = page.locator("article").filter({ hasText: `@${username}` });
-    await expect(card.getByText("Cuenta inactiva")).toBeVisible();
-    await card.getByRole("button", { name: "Activar cuenta" }).click();
-    await page.getByRole("button", { name: "Confirmar activación" }).click();
-    await expect(page.getByText(/servidor confirmó la activación/i)).toBeVisible();
+    const employeeRow = page.getByRole("row").filter({ hasText: `@${username}` });
+    await expect(employeeRow.getByText("Cuenta inactiva")).toBeVisible();
+    await employeeRow.getByRole("button", { name: /ver detalles/i }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Activar acceso" }).click();
+    const activationDialog = page.getByRole("alertdialog");
+    const activationPromise = waitForManageProfile(page, "activate", username);
+    await activationDialog.getByRole("button", { name: "Activar acceso" }).click();
+    const activationResponse = await activationPromise;
+    expect((await activationResponse.json()).profile.active).toBe(true);
+    await expect
+      .poll(async () => {
+        const result = await service
+          .from("user_profiles")
+          .select("active")
+          .eq("auth_user_id", saved.data.auth_user_id)
+          .single();
+        assertNoError(result.error);
+        return result.data.active;
+      })
+      .toBe(true);
+    await expect(
+      page
+        .getByRole("row")
+        .filter({ hasText: `@${username}` })
+        .getByText("Cuenta activa"),
+    ).toBeVisible();
     const active = await service
       .from("user_profiles")
       .select("active")
@@ -191,11 +251,23 @@ test.describe("CHG-22 secure user creation", () => {
     assertNoError(active.error);
     expect(active.data.active).toBe(true);
 
-    const editor = card.locator("form");
-    await editor.getByLabel("Nombre", { exact: true }).fill("CHG-22 edited employee");
-    await editor.getByLabel("Teléfono", { exact: true }).fill("+1 809 555 0199");
-    await editor.getByRole("button", { name: "Guardar perfil" }).click();
-    await expect(page.getByText("El servidor confirmó los datos del perfil.")).toBeVisible();
+    await page
+      .getByRole("row")
+      .filter({ hasText: `@${username}` })
+      .getByRole("button", { name: /ver detalles/i })
+      .click();
+    const employeeDialog = page.getByRole("dialog");
+    await employeeDialog.getByLabel("Nombre", { exact: true }).fill("CHG-22 edited employee");
+    await employeeDialog.getByLabel("Teléfono", { exact: true }).fill("+1 809 555 0199");
+    const editPromise = waitForManageProfile(page, "update", username);
+    await employeeDialog.getByRole("button", { name: "Guardar cambios" }).click();
+    const editResponse = await editPromise;
+    expect((await editResponse.json()).profile).toMatchObject({
+      name: "CHG-22 edited employee",
+      phone: "+1 809 555 0199",
+      role: "employee",
+    });
+    await expect(page.getByText("Cambios del empleado guardados.")).toBeVisible();
     const edited = await service
       .from("user_profiles")
       .select("name,phone,role")
@@ -207,17 +279,28 @@ test.describe("CHG-22 secure user creation", () => {
       phone: "+1 809 555 0199",
       role: "employee",
     });
+    await expect(page.getByText("Cambios del empleado guardados.")).toHaveCount(0, {
+      timeout: 10_000,
+    });
 
-    const clientsPermission = card.getByRole("checkbox", { name: "Clientes" });
+    const clientsPermission = employeeDialog.getByRole("checkbox", { name: "Clientes" });
     await clientsPermission.click();
-    await expect(page.getByText("Permisos actualizados.")).toBeVisible();
-    const permissions = await service
-      .from("user_profiles")
-      .select("permissions")
-      .eq("auth_user_id", saved.data.auth_user_id)
-      .single();
-    assertNoError(permissions.error);
-    expect(permissions.data.permissions).toContain("clients");
+    const permissionPromise = waitForManageProfile(page, "update", username);
+    await employeeDialog.getByRole("button", { name: "Guardar cambios" }).click();
+    const permissionResponse = await permissionPromise;
+    expect((await permissionResponse.json()).profile.permissions).toContain("clients");
+    await expect(page.getByText("Cambios del empleado guardados.")).toBeVisible();
+    await expect
+      .poll(async () => {
+        const result = await service
+          .from("user_profiles")
+          .select("permissions")
+          .eq("auth_user_id", saved.data.auth_user_id)
+          .single();
+        assertNoError(result.error);
+        return result.data.permissions;
+      })
+      .toContain("clients");
 
     for (const width of [320, 375, 768, 1280]) {
       await page.setViewportSize({ width, height: 900 });

@@ -1749,6 +1749,7 @@ ROLLBACK;`;
       .update({ role: "admin", active: true })
       .eq("auth_user_id", identities.admin.id);
     assert.ifError(adminReady.error);
+    let revokedAccountPassword = password;
     try {
       const client = await signedIn(identities.revoked);
       const { data: beforeRows, error: beforeError } = await client
@@ -1759,6 +1760,62 @@ ROLLBACK;`;
       assert.ok(beforeRows.length >= 1);
       const admin = await signedIn(identities.admin);
       const { data: adminSession } = await admin.auth.getSession();
+
+      const activeProfileBeforeRecovery = await service
+        .from("user_profiles")
+        .select("active,role,permissions,password_change_required")
+        .eq("auth_user_id", identities.revoked.id)
+        .single();
+      assert.ifError(activeProfileBeforeRecovery.error);
+      const activeRecovery = await fetch(`${url}/functions/v1/manage-profile`, {
+        method: "POST",
+        headers: {
+          apikey: anonKey,
+          authorization: `Bearer ${adminSession.session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "generate_recovery_link",
+          username: identities.revoked.username,
+        }),
+      });
+      assert.equal(activeRecovery.status, 200);
+      const activeRecoveryBody = await activeRecovery.json();
+      const activeRecoveryUrl = new URL(activeRecoveryBody.recovery_url);
+      assert.equal(activeRecoveryUrl.searchParams.get("type"), "recovery");
+      const activeRecoveryAuth = createClient(url, anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const activeRecoveryVerified = await activeRecoveryAuth.auth.verifyOtp({
+        token_hash: activeRecoveryUrl.searchParams.get("token"),
+        type: "recovery",
+      });
+      assert.ifError(activeRecoveryVerified.error);
+      assert.equal(activeRecoveryVerified.data.user.id, identities.revoked.id);
+      revokedAccountPassword = `Recovered-${crypto.randomUUID()}-9b!`;
+      const activePasswordChange = await activeRecoveryAuth.auth.updateUser({
+        password: revokedAccountPassword,
+      });
+      assert.ifError(activePasswordChange.error);
+      const recoveredLogin = await fetch(`${url}/functions/v1/username-login`, {
+        method: "POST",
+        headers: { apikey: anonKey, "content-type": "application/json" },
+        body: JSON.stringify({
+          username: identities.revoked.username,
+          password: revokedAccountPassword,
+        }),
+      });
+      assert.equal(recoveredLogin.status, 200, "recovered password starts a valid session");
+      const activeProfileAfterRecovery = await service
+        .from("user_profiles")
+        .select("active,role,permissions,password_change_required")
+        .eq("auth_user_id", identities.revoked.id)
+        .single();
+      assert.ifError(activeProfileAfterRecovery.error);
+      assert.deepEqual(activeProfileAfterRecovery.data, activeProfileBeforeRecovery.data);
+      const recoverySignedOut = await activeRecoveryAuth.auth.signOut({ scope: "local" });
+      assert.ifError(recoverySignedOut.error);
+
       const revoke = await fetch(`${url}/functions/v1/manage-profile`, {
         method: "POST",
         headers: {
@@ -1772,6 +1829,119 @@ ROLLBACK;`;
       const after = await client.from("clients").select("id").limit(1);
       assert.equal(after.error, null);
       assert.deepEqual(after.data, []);
+      const blockedLogin = await fetch(`${url}/functions/v1/username-login`, {
+        method: "POST",
+        headers: { apikey: anonKey, "content-type": "application/json" },
+        body: JSON.stringify({
+          username: identities.revoked.username,
+          password: revokedAccountPassword,
+        }),
+      });
+      assert.equal(blockedLogin.status, 401, "revoked Auth identity cannot start another session");
+      const blockedRecovery = await fetch(`${url}/functions/v1/manage-profile`, {
+        method: "POST",
+        headers: {
+          apikey: anonKey,
+          authorization: `Bearer ${adminSession.session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "generate_recovery_link",
+          username: identities.revoked.username,
+        }),
+      });
+      assert.equal(blockedRecovery.status, 409);
+      const blockedRecoveryBody = await blockedRecovery.json();
+      assert.match(blockedRecoveryBody.error, /reactivar/i);
+      assert.equal(Object.hasOwn(blockedRecoveryBody, "recovery_url"), false);
+
+      // Recreate the observed drift: a profile is active while its Auth identity remains banned.
+      const staleActiveProfile = await service
+        .from("user_profiles")
+        .update({ active: true })
+        .eq("auth_user_id", identities.revoked.id);
+      assert.ifError(staleActiveProfile.error);
+      const reactivate = await fetch(`${url}/functions/v1/manage-profile`, {
+        method: "POST",
+        headers: {
+          apikey: anonKey,
+          authorization: `Bearer ${adminSession.session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "activate", username: identities.revoked.username }),
+      });
+      assert.equal(reactivate.status, 200);
+      assert.equal((await reactivate.json()).profile.active, true);
+
+      const reactivatedLogin = await fetch(`${url}/functions/v1/username-login`, {
+        method: "POST",
+        headers: { apikey: anonKey, "content-type": "application/json" },
+        body: JSON.stringify({
+          username: identities.revoked.username,
+          password: revokedAccountPassword,
+        }),
+      });
+      assert.equal(
+        reactivatedLogin.status,
+        200,
+        "reactivated employee can log in after Auth is unbanned",
+      );
+      const profileBeforeRecovery = await service
+        .from("user_profiles")
+        .select("active,role,permissions,password_change_required")
+        .eq("auth_user_id", identities.revoked.id)
+        .single();
+      assert.ifError(profileBeforeRecovery.error);
+      const freshRecovery = await fetch(`${url}/functions/v1/manage-profile`, {
+        method: "POST",
+        headers: {
+          apikey: anonKey,
+          authorization: `Bearer ${adminSession.session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "generate_recovery_link",
+          username: identities.revoked.username,
+        }),
+      });
+      assert.equal(freshRecovery.status, 200);
+      const freshRecoveryBody = await freshRecovery.json();
+      assert.ok(
+        typeof freshRecoveryBody.recovery_url === "string" && freshRecoveryBody.recovery_url,
+        "an active, unblocked employee can receive an admin-assisted recovery link",
+      );
+      const recoveryUrl = new URL(freshRecoveryBody.recovery_url);
+      assert.equal(recoveryUrl.searchParams.get("type"), "recovery");
+      const recoveryAuth = createClient(url, anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const acceptedRecovery = await recoveryAuth.auth.verifyOtp({
+        token_hash: recoveryUrl.searchParams.get("token"),
+        type: "recovery",
+      });
+      assert.equal(acceptedRecovery.error?.code ?? null, null);
+      const changedPassword = await recoveryAuth.auth.updateUser({
+        password: `Recovered-${crypto.randomUUID()}-9c!`,
+      });
+      assert.equal(changedPassword.error?.code ?? null, null);
+      const profileAfterRecovery = await service
+        .from("user_profiles")
+        .select("active,role,permissions,password_change_required")
+        .eq("auth_user_id", identities.revoked.id)
+        .single();
+      assert.ifError(profileAfterRecovery.error);
+      assert.deepEqual(profileAfterRecovery.data, profileBeforeRecovery.data);
+
+      const adminLogin = await fetch(`${url}/functions/v1/username-login`, {
+        method: "POST",
+        headers: { apikey: anonKey, "content-type": "application/json" },
+        body: JSON.stringify({ username: identities.admin.username, password }),
+      });
+      assert.equal(
+        adminLogin.status,
+        200,
+        "the administrator identity is not modified by employee repair",
+      );
     } finally {
       const restoreAdmin = await service
         .from("user_profiles")

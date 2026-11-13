@@ -26,6 +26,8 @@ export default defineConfig({
     env: {
       VITE_SUPABASE_URL: localApiUrl,
       VITE_SUPABASE_ANON_KEY: process.env.LOCAL_SUPABASE_ANON_KEY ?? "",
+      VITE_ACCOUNT_PROVISIONING_ENABLED: "true",
+      VITE_ACCOUNT_RECOVERY_ENABLED: process.env.VITE_ACCOUNT_RECOVERY_ENABLED ?? "true",
     },
     timeout: 60_000,
   },

@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { json, normalizeUsername } from "../_shared/http.ts";
+import { activateProfile } from "../_shared/employee-activation.js";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -214,12 +215,46 @@ Deno.serve(async (request: Request) => {
     });
   }
   if (
-    !username ||
-    !["create_user", "update", "revoke", "activate", "resolve_provisioning_incident"].includes(
-      String(input.action),
-    )
+    (!username && input.action !== "list_employees") ||
+    ![
+      "list_employees",
+      "create_user",
+      "update",
+      "revoke",
+      "activate",
+      "generate_recovery_link",
+      "resolve_provisioning_incident",
+    ].includes(String(input.action))
   ) {
     return json(request, 400, { error: "Solicitud inválida" });
+  }
+
+  if (input.action === "list_employees") {
+    const { data: profiles, error: profilesError } = await service
+      .from("user_profiles")
+      .select(
+        "auth_user_id, username, name, phone, role, permissions, active, password_change_required",
+      )
+      .order("username");
+    if (profilesError)
+      return json(request, 503, { error: "No se pudo cargar la lista de empleados." });
+
+    const directory = await Promise.all(
+      (profiles ?? []).map(async (profile) => {
+        let emailConfirmed: boolean | null = null;
+        try {
+          const { data, error } = await service.auth.admin.getUserById(profile.auth_user_id);
+          const confirmedAt = data?.user?.email_confirmed_at;
+          if (!error && typeof confirmedAt === "string") emailConfirmed = true;
+          else if (!error && confirmedAt === null) emailConfirmed = false;
+        } catch {
+          // If Auth cannot confirm the state, keep it unknown instead of inferring false.
+        }
+        const { auth_user_id: _authUserId, ...safeProfile } = profile;
+        return { ...safeProfile, email_confirmed: emailConfirmed };
+      }),
+    );
+    return json(request, 200, { profiles: directory });
   }
 
   if (input.action === "create_user") {
@@ -564,6 +599,43 @@ Deno.serve(async (request: Request) => {
     return json(request, 409, { error: "No puedes revocar tu propia cuenta desde esta sesión" });
   }
 
+  if (input.action === "generate_recovery_link") {
+    let redirectTo: string;
+    try {
+      redirectTo = inviteRedirectUrl("/reset-password");
+    } catch {
+      return json(request, 503, { error: "La URL de recuperación no está configurada." });
+    }
+    const { data: authIdentity, error: authIdentityError } = await service.auth.admin.getUserById(
+      target.auth_user_id,
+    );
+    const email = authIdentity?.user?.email?.trim();
+    if (authIdentityError || !authIdentity?.user || !email) {
+      return json(request, 503, { error: "No se pudo verificar la identidad de la cuenta." });
+    }
+    const bannedUntil = authIdentity.user.banned_until;
+    const bannedUntilTimestamp = typeof bannedUntil === "string" ? Date.parse(bannedUntil) : null;
+    const authIdentityBanned =
+      bannedUntilTimestamp !== null &&
+      (Number.isNaN(bannedUntilTimestamp) || bannedUntilTimestamp > Date.now());
+    if (!target.active || authIdentityBanned) {
+      return json(request, 409, {
+        error:
+          "La cuenta está revocada o bloqueada en Auth. Un administrador debe reactivar el acceso antes de generar un enlace de recuperación.",
+      });
+    }
+    const { data: generated, error: linkError } = await service.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: { redirectTo },
+    });
+    const recoveryUrl = generated?.properties?.action_link;
+    if (linkError || typeof recoveryUrl !== "string" || !recoveryUrl) {
+      return json(request, 503, { error: "No se pudo generar el enlace de recuperación." });
+    }
+    return json(request, 200, { recovery_url: recoveryUrl });
+  }
+
   if (input.action === "revoke") {
     const { data: revoked, error } = await service
       .from("user_profiles")
@@ -583,28 +655,8 @@ Deno.serve(async (request: Request) => {
   }
 
   if (input.action === "activate") {
-    if (target.password_change_required) {
-      return json(request, 409, {
-        error: "La persona debe establecer su contraseña personal antes de activar el acceso.",
-      });
-    }
-    const { data: authTarget, error: authTargetError } = await service.auth.admin.getUserById(
-      target.auth_user_id,
-    );
-    if (authTargetError)
-      return json(request, 503, { error: "No se pudo verificar el correo de la cuenta." });
-    if (!authTarget.user?.email || !authTarget.user.email_confirmed_at) {
-      return json(request, 409, { error: "La cuenta no tiene un correo confirmado." });
-    }
-    const { data: activated, error: activateError } = await service
-      .from("user_profiles")
-      .update({ active: true })
-      .eq("auth_user_id", target.auth_user_id)
-      .select("username,name,phone,role,permissions,active,password_change_required")
-      .maybeSingle();
-    if (activateError || !activated)
-      return json(request, 409, { error: "No se pudo activar el perfil." });
-    return json(request, 200, { profile: activated });
+    const result = await activateProfile(service, target);
+    return json(request, result.status, result.body);
   }
 
   const update: Record<string, unknown> = {};
