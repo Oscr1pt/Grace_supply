@@ -533,19 +533,11 @@ function InventoryPage() {
                             .value as InventoryForm["taxClassification"],
                         })
                       }
-                      aria-describedby="inventory-tax-classification-help"
                     >
                       <option value="pendiente">Pendiente de clasificación</option>
                       <option value="gravado">Gravado</option>
                       <option value="exento">Exento</option>
                     </select>
-                    <p
-                      id="inventory-tax-classification-help"
-                      className="text-xs text-muted-foreground"
-                    >
-                      La clasificación se aplicará solo cuando exista una política aprobada por el
-                      servidor.
-                    </p>
                   </Field>
                   <Field label="Presentación / Tamaño">
                     <Input
