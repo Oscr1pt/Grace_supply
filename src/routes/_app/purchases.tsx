@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
-import { useSupabaseTable, useSupabaseView, fmtMoney, fmtDate } from "@/lib/storage";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSupabaseView, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { Purchase } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
@@ -41,6 +41,10 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { validatePurchaseDraft } from "@/lib/businessDocumentValidation.js";
+import { HistoryFilterBar } from "@/components/HistoryFilterBar";
+import { HistoryPagination } from "@/components/HistoryPagination";
+import { usePurchasesHistory } from "@/lib/historyQueries";
+import type { HistoryPeriod } from "@/lib/historyDateRange.js";
 
 export const Route = createFileRoute("/_app/purchases")({
   component: PurchasesPage,
@@ -56,12 +60,25 @@ const empty: Omit<Purchase, "id" | "createdAt" | "total"> = {
 const quickPurchaseSupplier = "Proveedor no identificado";
 
 function PurchasesPage() {
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriod>("all");
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
+  const [historyPageNumber, setHistoryPageNumber] = useState(1);
   const {
-    data: purchases,
+    records: purchases,
+    totalCount: purchasesTotalCount,
     refresh: refreshPurchases,
     loading: purchasesLoading,
-    loadError: purchasesError,
-  } = useSupabaseTable<Purchase>("purchases");
+    error: purchasesError,
+    dateError: purchasesDateError,
+  } = usePurchasesHistory({
+    search: historySearch,
+    period: historyPeriod,
+    from: historyFrom,
+    to: historyTo,
+    page: historyPageNumber,
+  });
   const {
     data: inventory,
     refresh: refreshInventory,
@@ -377,6 +394,37 @@ function PurchasesPage() {
       setAnnulPending(false);
     }
   };
+
+  const historyHasFilters = Boolean(
+    historySearch || historyPeriod !== "all" || historyFrom || historyTo,
+  );
+  const purchasesPageCount = Math.max(1, Math.ceil(purchasesTotalCount / 25));
+
+  const commitHistorySearch = useCallback((value: string) => {
+    setHistorySearch(value);
+    setHistoryPageNumber(1);
+  }, []);
+
+  const changeHistoryPeriod = useCallback((period: HistoryPeriod) => {
+    setHistoryPeriod(period);
+    setHistoryPageNumber(1);
+    if (period !== "custom") {
+      setHistoryFrom("");
+      setHistoryTo("");
+    }
+  }, []);
+
+  const clearHistoryFilters = useCallback(() => {
+    setHistorySearch("");
+    setHistoryPeriod("all");
+    setHistoryFrom("");
+    setHistoryTo("");
+    setHistoryPageNumber(1);
+  }, []);
+
+  useEffect(() => {
+    if (historyPageNumber > purchasesPageCount) setHistoryPageNumber(purchasesPageCount);
+  }, [historyPageNumber, purchasesPageCount]);
 
   return (
     <div>
@@ -836,6 +884,26 @@ function PurchasesPage() {
         }
       />
 
+      <HistoryFilterBar
+        kind="purchases"
+        search={historySearch}
+        onSearch={commitHistorySearch}
+        period={historyPeriod}
+        onPeriodChange={changeHistoryPeriod}
+        from={historyFrom}
+        onFromChange={(value) => {
+          setHistoryFrom(value);
+          setHistoryPageNumber(1);
+        }}
+        to={historyTo}
+        onToChange={(value) => {
+          setHistoryTo(value);
+          setHistoryPageNumber(1);
+        }}
+        dateError={purchasesDateError}
+        onClear={clearHistoryFilters}
+      />
+
       {purchasesError && (
         <Alert variant="destructive" className="mb-3">
           <AlertTitle>No se pudieron cargar las compras</AlertTitle>
@@ -877,10 +945,18 @@ function PurchasesPage() {
                   No se muestran datos porque la lectura falló.
                 </td>
               </tr>
+            ) : purchasesDateError ? (
+              <tr>
+                <td colSpan={6} className="text-center py-12 text-muted-foreground">
+                  Corrige el rango en los filtros para consultar las compras.
+                </td>
+              </tr>
             ) : purchases.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                  Aún no hay compras.
+                  {historyHasFilters
+                    ? "No hay compras que coincidan con los filtros."
+                    : "Aún no hay compras."}
                 </td>
               </tr>
             ) : (
@@ -938,6 +1014,12 @@ function PurchasesPage() {
           </tbody>
         </table>
       </div>
+      <HistoryPagination
+        kind="purchases"
+        page={historyPageNumber}
+        totalCount={purchasesTotalCount}
+        onPageChange={setHistoryPageNumber}
+      />
       <Dialog
         open={Boolean(annulTarget)}
         onOpenChange={(open) => {

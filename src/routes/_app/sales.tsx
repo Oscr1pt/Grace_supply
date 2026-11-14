@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSupabaseTable, useSupabaseView, fmtMoney, fmtDate } from "@/lib/storage";
+import { useSupabaseView, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { Sale, SaleLine } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
@@ -44,18 +44,35 @@ import {
   readPendingBusinessOperation,
 } from "@/lib/pendingBusinessOperation.js";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { HistoryFilterBar } from "@/components/HistoryFilterBar";
+import { HistoryPagination } from "@/components/HistoryPagination";
+import { loadSaleHistoryLines, useSalesHistory } from "@/lib/historyQueries";
+import type { HistoryPeriod } from "@/lib/historyDateRange.js";
 
 export const Route = createFileRoute("/_app/sales")({
   component: SalesPage,
 });
 
 function SalesPage() {
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriod>("all");
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
+  const [historyPageNumber, setHistoryPageNumber] = useState(1);
   const {
-    data: sales,
+    records: sales,
+    totalCount: salesTotalCount,
     refresh: refreshSales,
     loading: salesLoading,
-    loadError: salesError,
-  } = useSupabaseTable<Sale>("sales");
+    error: salesError,
+    dateError: salesDateError,
+  } = useSalesHistory({
+    search: historySearch,
+    period: historyPeriod,
+    from: historyFrom,
+    to: historyTo,
+    page: historyPageNumber,
+  });
   const {
     data: clients,
     refresh: refreshClients,
@@ -90,6 +107,10 @@ function SalesPage() {
   const [paymentType, setPaymentType] = useState<"contado" | "credito">("contado");
   const [dueDate, setDueDate] = useState<string>("");
   const [viewing, setViewing] = useState<Sale | null>(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+  const receiptRequest = useRef(0);
+  const receiptController = useRef<AbortController | null>(null);
   const [annulTarget, setAnnulTarget] = useState<Sale | null>(null);
   const [annulReason, setAnnulReason] = useState("");
   const [annulPending, setAnnulPending] = useState(false);
@@ -367,6 +388,8 @@ function SalesPage() {
       );
       setOpen(false);
       reset();
+      setReceiptLoading(false);
+      setReceiptError(null);
       setViewing(sale);
     } catch (e) {
       const uncertain = e instanceof PersistenceError && e.kind === "uncertain";
@@ -430,6 +453,8 @@ function SalesPage() {
       toast.success("Venta confirmada y reconciliada");
       setOpen(false);
       reset();
+      setReceiptLoading(false);
+      setReceiptError(null);
       setViewing(sale);
     } catch (error) {
       toast.error(userPersistenceMessage(error));
@@ -530,6 +555,80 @@ function SalesPage() {
   };
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name || "—";
+  const historyHasFilters = Boolean(
+    historySearch || historyPeriod !== "all" || historyFrom || historyTo,
+  );
+  const salesPageCount = Math.max(1, Math.ceil(salesTotalCount / 25));
+
+  const commitHistorySearch = useCallback((value: string) => {
+    setHistorySearch(value);
+    setHistoryPageNumber(1);
+  }, []);
+  const changeHistoryPeriod = useCallback((value: HistoryPeriod) => {
+    setHistoryPeriod(value);
+    setHistoryPageNumber(1);
+    if (value !== "custom") {
+      setHistoryFrom("");
+      setHistoryTo("");
+    }
+  }, []);
+  const clearHistoryFilters = useCallback(() => {
+    setHistorySearch("");
+    setHistoryPeriod("all");
+    setHistoryFrom("");
+    setHistoryTo("");
+    setHistoryPageNumber(1);
+  }, []);
+
+  useEffect(() => {
+    if (!salesLoading && historyPageNumber > salesPageCount) {
+      setHistoryPageNumber(salesPageCount);
+    }
+  }, [historyPageNumber, salesLoading, salesPageCount]);
+
+  const openReceipt = useCallback(async (sale: Sale) => {
+    receiptController.current?.abort();
+    const requestId = ++receiptRequest.current;
+    setReceiptError(null);
+    if (sale.lines.length > 0) {
+      setReceiptLoading(false);
+      setViewing(sale);
+      return;
+    }
+    const controller = new AbortController();
+    receiptController.current = controller;
+    setViewing({ ...sale, lines: [] });
+    setReceiptLoading(true);
+    try {
+      const lines = await loadSaleHistoryLines(sale.id, controller.signal);
+      if (requestId === receiptRequest.current && !controller.signal.aborted) {
+        setViewing((current) => (current?.id === sale.id ? { ...sale, lines } : current));
+      }
+    } catch {
+      if (requestId === receiptRequest.current && !controller.signal.aborted) {
+        setReceiptError(
+          "No se pudieron cargar los detalles del recibo. Puedes volver a intentarlo.",
+        );
+      }
+    } finally {
+      if (requestId === receiptRequest.current && !controller.signal.aborted) {
+        setReceiptLoading(false);
+      }
+    }
+  }, []);
+
+  const closeReceipt = useCallback(() => {
+    receiptRequest.current += 1;
+    receiptController.current?.abort();
+    receiptController.current = null;
+    setViewing(null);
+    setReceiptLoading(false);
+    setReceiptError(null);
+  }, []);
+
+  const retryReceipt = useCallback(() => {
+    if (viewing) void openReceipt(viewing);
+  }, [openReceipt, viewing]);
 
   return (
     <div>
@@ -906,6 +1005,26 @@ function SalesPage() {
         }
       />
 
+      <HistoryFilterBar
+        kind="sales"
+        search={historySearch}
+        onSearch={commitHistorySearch}
+        period={historyPeriod}
+        onPeriodChange={changeHistoryPeriod}
+        from={historyFrom}
+        onFromChange={(value) => {
+          setHistoryFrom(value);
+          setHistoryPageNumber(1);
+        }}
+        to={historyTo}
+        onToChange={(value) => {
+          setHistoryTo(value);
+          setHistoryPageNumber(1);
+        }}
+        dateError={salesDateError}
+        onClear={clearHistoryFilters}
+      />
+
       {salesError && (
         <Alert variant="destructive" className="mb-3">
           <AlertTitle>No se pudieron cargar las ventas</AlertTitle>
@@ -947,23 +1066,40 @@ function SalesPage() {
                   No se muestran datos porque la lectura falló.
                 </td>
               </tr>
+            ) : salesDateError ? (
+              <tr>
+                <td colSpan={6} className="text-center py-12 text-muted-foreground">
+                  Corrige el rango en los filtros para consultar las ventas.
+                </td>
+              </tr>
             ) : sales.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                  Aún no hay ventas.
+                  {historyHasFilters ? (
+                    <span>
+                      No hay ventas que coincidan con los filtros.
+                      <Button
+                        variant="link"
+                        className="ml-1 h-auto p-0"
+                        onClick={clearHistoryFilters}
+                      >
+                        Limpiar filtros
+                      </Button>
+                    </span>
+                  ) : (
+                    "Aún no hay ventas."
+                  )}
                 </td>
               </tr>
             ) : (
               sales.map((s) => (
                 <tr key={s.id} className="border-t border-border hover:bg-muted/30">
                   <td className="px-4 py-3 font-mono text-xs">{s.receiptNo}</td>
-                  <td className="px-4 py-3">{clientName(s.clientId)}</td>
+                  <td className="px-4 py-3">{s.clientName || clientName(s.clientId)}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {fmtDate(s.createdAt)}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    {s.lines.reduce((a, b) => a + b.quantity, 0)}
-                  </td>
+                  <td className="px-4 py-3 text-right">{s.pieceCount}</td>
                   <td className="px-4 py-3 text-right font-mono">
                     {fmtMoney(s.total, settings.currency)}
                   </td>
@@ -972,7 +1108,7 @@ function SalesPage() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() => setViewing(s)}
+                        onClick={() => void openReceipt(s)}
                         aria-label={`Ver recibo ${s.receiptNo}`}
                       >
                         <ReceiptIcon className="h-4 w-4" />
@@ -1007,7 +1143,20 @@ function SalesPage() {
         </table>
       </div>
 
-      <ReceiptDialog sale={viewing} onClose={() => setViewing(null)} />
+      <HistoryPagination
+        kind="sales"
+        page={historyPageNumber}
+        totalCount={salesTotalCount}
+        onPageChange={setHistoryPageNumber}
+      />
+
+      <ReceiptDialog
+        sale={viewing}
+        loading={receiptLoading}
+        error={receiptError}
+        onRetry={retryReceipt}
+        onClose={closeReceipt}
+      />
       <Dialog
         open={Boolean(annulTarget)}
         onOpenChange={(open) => {
@@ -1114,103 +1263,136 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
   );
 }
 
-function ReceiptDialog({ sale, onClose }: { sale: Sale | null; onClose: () => void }) {
+function ReceiptDialog({
+  sale,
+  loading,
+  error,
+  onRetry,
+  onClose,
+}: {
+  sale: Sale | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
   const [settings] = useSettings();
   const { data: clients } = useSupabaseView("sales_client_lookup");
   if (!sale) return null;
   const client = clients.find((c) => c.id === sale.clientId);
+  const historyClientName = "clientName" in sale ? sale.clientName : null;
   return (
     <Dialog open={!!sale} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader className="no-print">
           <DialogTitle>Recibo {sale.receiptNo}</DialogTitle>
         </DialogHeader>
-        <div id="receipt-print" className="bg-white text-black p-6 rounded-md font-sans">
-          <div className="text-center border-b border-gray-300 pb-3">
-            <div
-              className="font-display text-2xl"
-              style={{ fontFamily: "'Cormorant Garamond', serif" }}
-            >
-              {settings.businessName}
+        {loading ? (
+          <p role="status" className="py-8 text-center text-sm text-muted-foreground">
+            Cargando detalles del recibo…
+          </p>
+        ) : error ? (
+          <Alert variant="destructive" className="no-print">
+            <AlertTitle>No se pudieron cargar los detalles</AlertTitle>
+            <AlertDescription>
+              {error}
+              <Button type="button" variant="outline" size="sm" className="ml-2" onClick={onRetry}>
+                Reintentar
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div id="receipt-print" className="bg-white text-black p-6 rounded-md font-sans">
+            <div className="text-center border-b border-gray-300 pb-3">
+              <div
+                className="font-display text-2xl"
+                style={{ fontFamily: "'Cormorant Garamond', serif" }}
+              >
+                {settings.businessName}
+              </div>
+              <div className="text-xs text-gray-600 mt-1">{settings.businessAddress}</div>
+              <div className="text-xs text-gray-600">{settings.businessPhone}</div>
+              <div className="mt-2 text-[11px] font-semibold tracking-wide">
+                RECIBO INTERNO — NO ES COMPROBANTE FISCAL
+              </div>
             </div>
-            <div className="text-xs text-gray-600 mt-1">{settings.businessAddress}</div>
-            <div className="text-xs text-gray-600">{settings.businessPhone}</div>
-            <div className="mt-2 text-[11px] font-semibold tracking-wide">
-              RECIBO INTERNO — NO ES COMPROBANTE FISCAL
+            {sale.voidedAt && (
+              <div className="mt-3 rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800">
+                <strong>VENTA ANULADA</strong> · {fmtDate(sale.voidedAt)}
+                {sale.voidReason ? ` · Motivo: ${sale.voidReason}` : ""}
+              </div>
+            )}
+            <div className="flex justify-between text-xs mt-3">
+              <div>
+                <div className="text-gray-500 uppercase tracking-wider">Cliente</div>
+                <div className="font-medium text-sm">
+                  {client?.name ||
+                    (typeof historyClientName === "string" ? historyClientName : null) ||
+                    "Mostrador"}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-gray-500 uppercase tracking-wider">Recibo</div>
+                <div className="font-mono text-sm">{sale.receiptNo}</div>
+                <div>{new Date(sale.createdAt).toLocaleString()}</div>
+                <div className="mt-1">{sale.paymentType === "credito" ? "Crédito" : "Contado"}</div>
+              </div>
             </div>
-          </div>
-          {sale.voidedAt && (
-            <div className="mt-3 rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800">
-              <strong>VENTA ANULADA</strong> · {fmtDate(sale.voidedAt)}
-              {sale.voidReason ? ` · Motivo: ${sale.voidReason}` : ""}
-            </div>
-          )}
-          <div className="flex justify-between text-xs mt-3">
-            <div>
-              <div className="text-gray-500 uppercase tracking-wider">Cliente</div>
-              <div className="font-medium text-sm">{client?.name || "Mostrador"}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-gray-500 uppercase tracking-wider">Recibo</div>
-              <div className="font-mono text-sm">{sale.receiptNo}</div>
-              <div>{new Date(sale.createdAt).toLocaleString()}</div>
-              <div className="mt-1">{sale.paymentType === "credito" ? "Crédito" : "Contado"}</div>
-            </div>
-          </div>
-          <table className="w-full text-xs mt-4">
-            <thead>
-              <tr className="border-b border-gray-300">
-                <th className="text-left py-2">Pieza</th>
-                <th className="text-right py-2">Cant.</th>
-                <th className="text-right py-2">Precio</th>
-                <th className="text-right py-2">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sale.lines.map((l) => (
-                <tr key={l.itemId} className="border-b border-gray-200">
-                  <td className="py-2">
-                    <div className="font-medium">{l.name}</div>
-                    <div className="text-gray-500 font-mono">{l.sku}</div>
-                  </td>
-                  <td className="py-2 text-right">{l.quantity}</td>
-                  <td className="py-2 text-right font-mono">
-                    {fmtMoney(l.unitPrice, settings.currency)}
-                  </td>
-                  <td className="py-2 text-right font-mono">
-                    {fmtMoney(l.unitPrice * l.quantity, settings.currency)}
-                  </td>
+            <table className="w-full text-xs mt-4">
+              <thead>
+                <tr className="border-b border-gray-300">
+                  <th className="text-left py-2">Pieza</th>
+                  <th className="text-right py-2">Cant.</th>
+                  <th className="text-right py-2">Precio</th>
+                  <th className="text-right py-2">Total</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="ml-auto w-56 mt-3 text-xs space-y-1">
-            <div className="flex justify-between">
-              <span>Subtotal</span>
-              <span className="font-mono">{fmtMoney(sale.subtotal, settings.currency)}</span>
+              </thead>
+              <tbody>
+                {sale.lines.map((l) => (
+                  <tr key={l.itemId} className="border-b border-gray-200">
+                    <td className="py-2">
+                      <div className="font-medium">{l.name}</div>
+                      <div className="text-gray-500 font-mono">{l.sku}</div>
+                    </td>
+                    <td className="py-2 text-right">{l.quantity}</td>
+                    <td className="py-2 text-right font-mono">
+                      {fmtMoney(l.unitPrice, settings.currency)}
+                    </td>
+                    <td className="py-2 text-right font-mono">
+                      {fmtMoney(l.unitPrice * l.quantity, settings.currency)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="ml-auto w-56 mt-3 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span className="font-mono">{fmtMoney(sale.subtotal, settings.currency)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>
+                  {sale.taxCalculationEnabled === false
+                    ? "ITBIS desactivado"
+                    : `ITBIS (${sale.taxRate}%)`}
+                </span>
+                <span className="font-mono">{fmtMoney(sale.tax, settings.currency)}</span>
+              </div>
+              <div className="flex justify-between border-t border-gray-300 pt-1 font-semibold text-sm">
+                <span>Total</span>
+                <span className="font-mono">{fmtMoney(sale.total, settings.currency)}</span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span>
-                {sale.taxCalculationEnabled === false
-                  ? "ITBIS desactivado"
-                  : `ITBIS (${sale.taxRate}%)`}
-              </span>
-              <span className="font-mono">{fmtMoney(sale.tax, settings.currency)}</span>
-            </div>
-            <div className="flex justify-between border-t border-gray-300 pt-1 font-semibold text-sm">
-              <span>Total</span>
-              <span className="font-mono">{fmtMoney(sale.total, settings.currency)}</span>
+            <div className="text-center text-xs text-gray-500 mt-6 border-t border-gray-300 pt-3">
+              Gracias por su compra en {settings.businessName}.
             </div>
           </div>
-          <div className="text-center text-xs text-gray-500 mt-6 border-t border-gray-300 pt-3">
-            Gracias por su compra en {settings.businessName}.
-          </div>
-        </div>
+        )}
         <DialogFooter className="no-print">
           <Button variant="outline" onClick={onClose}>
             Cerrar
           </Button>
-          <Button onClick={() => window.print()}>
+          <Button onClick={() => window.print()} disabled={loading || Boolean(error)}>
             <Printer /> Imprimir recibo
           </Button>
         </DialogFooter>

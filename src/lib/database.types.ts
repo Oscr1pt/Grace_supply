@@ -375,6 +375,24 @@ export type Database = {
       };
     };
     Functions: {
+      search_sales_history: {
+        Args: {
+          p_search?: string | null;
+          p_from?: string | null;
+          p_to_exclusive?: string | null;
+          p_page?: number;
+        };
+        Returns: Json;
+      };
+      search_purchases_history: {
+        Args: {
+          p_search?: string | null;
+          p_from?: string | null;
+          p_to_exclusive?: string | null;
+          p_page?: number;
+        };
+        Returns: Json;
+      };
       set_product_tax_classification: {
         Args: { p_request: Json };
         Returns: Json;
