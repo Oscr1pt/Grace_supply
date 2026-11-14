@@ -774,7 +774,7 @@ function ExpensesPage() {
 
       {/* Search & Filters Toolbar */}
       <div className="p-4 rounded-xl border border-border bg-card mb-4 space-y-3 shadow-sm">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <div className="relative">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -824,21 +824,23 @@ function ExpensesPage() {
             </SelectContent>
           </Select>
 
-          <div className="flex gap-2 items-center">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-2 sm:flex-nowrap">
             <Input
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="text-xs h-9"
+              className="h-10 min-w-[9rem] flex-1 text-xs"
               title="Fecha desde"
+              aria-label="Fecha desde"
             />
             <span className="text-muted-foreground text-xs">—</span>
             <Input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="text-xs h-9"
+              className="h-10 min-w-[9rem] flex-1 text-xs"
               title="Fecha hasta"
+              aria-label="Fecha hasta"
             />
           </div>
         </div>

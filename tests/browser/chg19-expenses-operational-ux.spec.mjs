@@ -177,7 +177,7 @@ test.describe.serial("CHG-19 expense operations UX", () => {
     await expect(annulDialog).toBeVisible();
     await expect(annulDialog.locator(":focus")).toHaveCount(1);
     await annulDialog.getByLabel("Motivo obligatorio").fill("Synthetic UX annulment");
-    await annulDialog.getByRole("button", { name: "Confirmar anulación" }).click();
+    await annulDialog.getByRole("button", { name: "Confirmar anulaci\u00f3n" }).click();
     await expect(row).toBeHidden();
     await status.click();
     await page.getByRole("option", { name: "Anulados" }).click();
