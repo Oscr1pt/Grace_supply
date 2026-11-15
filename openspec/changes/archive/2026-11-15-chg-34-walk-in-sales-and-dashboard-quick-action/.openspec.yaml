@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-15
+goal: Permitir ventas de contado sin registrar clientes y acceso directo
+  autorizado a Nueva venta
