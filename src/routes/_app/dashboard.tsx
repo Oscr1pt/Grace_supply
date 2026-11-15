@@ -157,6 +157,20 @@ function Dashboard() {
             </h2>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {can("sales") && (
+              <Link
+                to="/sales"
+                search={{ new: "1" }}
+                className="group flex min-h-12 min-w-0 items-center gap-3 rounded-lg border border-border p-3 transition-colors hover:border-[#D4AF37] hover:bg-[#D4AF37]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:p-4"
+              >
+                <div className="shrink-0 text-muted-foreground transition-colors group-hover:text-[#D4AF37]">
+                  <Receipt aria-hidden="true" className="h-5 w-5" />
+                </div>
+                <span className="min-w-0 break-words text-sm font-medium transition-colors group-hover:text-foreground">
+                  Registrar venta
+                </span>
+              </Link>
+            )}
             {clientsAllowed && (
               <QuickLink
                 to="/clients"
@@ -194,6 +208,7 @@ function Dashboard() {
             )}
             {!clientsAllowed &&
               !inventoryAllowed &&
+              !can("sales") &&
               !can("expenses") &&
               !can("purchases") &&
               !can("suppliers") && (
@@ -203,8 +218,7 @@ function Dashboard() {
               )}
           </div>
           <p className="mt-4 text-xs text-muted-foreground">
-            La creación de ventas no aparece aquí; su disponibilidad depende de la política
-            tributaria vigente.
+            El formulario comprueba la política tributaria antes de permitir contabilizar una venta.
           </p>
         </section>
       </div>
@@ -385,7 +399,12 @@ function RecentSales({
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{sale.receiptNo}</div>
               <div className="truncate text-xs text-muted-foreground">
-                {canReadClients ? clientName.get(sale.clientId) || "Cliente" : "Cliente registrado"}{" "}
+                {sale.clientNameSnapshot ||
+                  (canReadClients
+                    ? (sale.clientId ? clientName.get(sale.clientId) : undefined) || "Cliente"
+                    : sale.clientId
+                      ? "Cliente registrado"
+                      : "Cliente ocasional")}{" "}
                 · {formatBusinessDate(sale.createdAt)}
               </div>
             </div>

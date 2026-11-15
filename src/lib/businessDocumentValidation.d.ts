@@ -1,7 +1,9 @@
 type LookupProduct = { id: string; price: number; quantity: number };
 type LookupParty = { id: string; status: string };
 type SaleDraftInput = {
+  customerMode?: "registered" | "occasional";
   clientId: string;
+  walkInName?: string;
   clients: LookupParty[];
   lines: Array<{ itemId: string; unitPrice: number; quantity: number; name: string }>;
   inventory: LookupProduct[];

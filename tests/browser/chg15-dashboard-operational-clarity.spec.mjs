@@ -15,7 +15,14 @@ const employee = {
   email: `chg15-employee-${suffix}@example.test`,
   password: `Dashboard-${crypto.randomUUID()}-9c!`,
 };
-const fixtureIds = { clients: [], inventory: [], sales: [], expenses: [], purchases: [] };
+const fixtureIds = {
+  clients: [],
+  inventory: [],
+  sales: [],
+  expenses: [],
+  purchases: [],
+  operations: [],
+};
 const skus = { active: `CHG15-A-${suffix}`, inactive: `CHG15-I-${suffix}` };
 let service;
 let adminActor;
@@ -99,6 +106,15 @@ test.describe.serial("CHG-15 dashboard operational clarity", () => {
 
   test.afterAll(async () => {
     if (!service) return;
+    for (const operationId of fixtureIds.operations) {
+      await service.from("payment_reversals").delete().eq("operation_id", operationId);
+      await service.from("financial_compensations").delete().eq("operation_id", operationId);
+      await service.from("financial_audit_events").delete().eq("operation_id", operationId);
+      await service.from("business_operations").delete().eq("id", operationId);
+    }
+    if (fixtureIds.sales.length) {
+      await service.from("sale_lines").delete().in("sale_id", fixtureIds.sales);
+    }
     for (const table of ["expenses", "sales", "purchases", "inventory", "clients"]) {
       const ids = fixtureIds[table];
       if (ids.length) await service.from(table).delete().in("id", ids);
@@ -373,7 +389,15 @@ test.describe.serial("CHG-15 dashboard operational clarity", () => {
     await expect(page.getByRole("group", { name: "Clientes activos" })).toContainText(
       "No hay clientes registrados.",
     );
-    await expect(page.getByText("Nueva venta", { exact: true })).toHaveCount(0);
+    const registerSale = page.getByRole("link", { name: "Registrar venta" });
+    await expect(registerSale).toBeVisible();
+    await registerSale.click();
+    await expect(page).toHaveURL(/\/sales$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+      page.getByText("La política tributaria vigente no permite iniciar una venta."),
+    ).toBeVisible();
+    await page.goto("/dashboard");
 
     await seedDashboardData();
     await page.reload();
@@ -399,9 +423,6 @@ test.describe.serial("CHG-15 dashboard operational clarity", () => {
       "1 inactivos",
     );
     await expect(page.getByText(`CHG15-VOID-${suffix}`, { exact: true })).toHaveCount(0);
-    await expect(
-      page.getByText("La creación de ventas no aparece aquí", { exact: false }),
-    ).toBeVisible();
     expect(adminSettings.tax_policy_approved).toBe(false);
   });
 
@@ -480,7 +501,11 @@ test.describe.serial("CHG-15 dashboard operational clarity", () => {
     await expect(page.getByRole("link", { name: "Abrir directorio" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Registrar gasto" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Registrar compra" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Registrar venta" })).toHaveCount(0);
     await expect(page.getByText("Nueva venta", { exact: true })).toHaveCount(0);
+    await page.goto("/sales?new=1");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Nueva venta/ })).toHaveCount(0);
     expect(inventorySelect).toBe("id,price,quantity,is_active");
     expect(resourceReads.length).toBeGreaterThan(0);
     expect(resourceReads.every((resource) => resource === "inventory")).toBe(true);
@@ -531,5 +556,105 @@ test.describe.serial("CHG-15 dashboard operational clarity", () => {
       return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
     });
     expect(contrast).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test("opens the authorized sale form from Dashboard and switches to a walk-in customer", async ({
+    page,
+  }) => {
+    const approved = await service
+      .from("settings")
+      .update({
+        tax_policy_approved: true,
+        tax_policy_status: "approved",
+        tax_policy_version: "chg34-dashboard-test",
+        tax_policy_approved_at: new Date().toISOString(),
+        tax_policy_approved_by: adminId,
+        tax_calculation_enabled: false,
+        tax_rate: 18,
+        tax_receipt_mode: "internal",
+        tax_prices_include: false,
+        tax_rounding_policy: "line_half_up",
+      })
+      .eq("id", adminSettings.id);
+    if (approved.error) throw approved.error;
+
+    try {
+      await login(page);
+      await page.goto("/dashboard");
+      const registerSale = page.getByRole("link", { name: "Registrar venta" });
+      await expect(registerSale).toBeVisible();
+      await registerSale.click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await expect.poll(() => new URL(page.url()).searchParams.has("new")).toBe(false);
+      await page.getByRole("button", { name: "Cancelar", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect.poll(() => new URL(page.url()).searchParams.has("new")).toBe(false);
+      await page.getByRole("button", { name: "Nueva venta", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Nueva venta" })).toBeVisible();
+
+      await page.getByLabel("Tipo de cliente").click();
+      await page.getByRole("option", { name: "Cliente ocasional" }).click();
+      const walkInName = page.getByLabel("Nombre del cliente ocasional");
+      await expect(walkInName).toBeVisible();
+      await expect(walkInName).toHaveAttribute("maxlength", "160");
+      await expect(page.locator("#sale-payment-type")).toHaveText("Contado (Inmediato)");
+      await expect(page.getByLabel(/documento|teléfono|correo/i)).toHaveCount(0);
+
+      const saleName = `CHG34 Playwright Mostrador ${suffix}`;
+      await walkInName.fill(saleName);
+      const itemSelector = page.getByRole("combobox").nth(1);
+      await itemSelector.click();
+      await page.getByRole("option", { name: new RegExp(skus.active) }).click();
+      await page.getByRole("button", { name: "Agregar" }).click();
+      await page.getByRole("button", { name: "Confirmar venta" }).click();
+      await expect(page.getByRole("heading", { name: "Nueva venta" })).toHaveCount(0);
+
+      const posted = await service
+        .from("sales")
+        .select("id,receipt_no,client_id,client_name_snapshot")
+        .eq("client_name_snapshot", saleName)
+        .single();
+      if (posted.error) throw posted.error;
+      fixtureIds.sales.push(posted.data.id);
+      expect(posted.data.client_id).toBeNull();
+      expect(posted.data.client_name_snapshot).toBe(saleName);
+      const operations = await service
+        .from("business_operations")
+        .select("id,result")
+        .eq("actor_id", adminId)
+        .eq("operation_type", "sale");
+      if (operations.error) throw operations.error;
+      const operation = operations.data.find((row) => row.result?.sale_id === posted.data.id);
+      if (operation) fixtureIds.operations.push(operation.id);
+
+      const historyRow = page.locator("tr").filter({ hasText: saleName });
+      await expect(historyRow).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: `Recibo ${posted.data.receipt_no}` }),
+      ).toBeVisible();
+      await expect(page.getByRole("dialog")).toContainText(saleName);
+      await page.getByRole("button", { name: "Cerrar", exact: true }).click();
+      await historyRow
+        .getByRole("button", { name: `Ver recibo ${posted.data.receipt_no}` })
+        .click();
+      await expect(page.getByRole("dialog")).toContainText(saleName);
+    } finally {
+      const restored = await service
+        .from("settings")
+        .update({
+          tax_policy_approved: adminSettings.tax_policy_approved,
+          tax_policy_status: adminSettings.tax_policy_status,
+          tax_policy_version: adminSettings.tax_policy_version,
+          tax_policy_approved_at: adminSettings.tax_policy_approved_at,
+          tax_policy_approved_by: adminSettings.tax_policy_approved_by,
+          tax_calculation_enabled: adminSettings.tax_calculation_enabled,
+          tax_rate: adminSettings.tax_rate,
+          tax_receipt_mode: adminSettings.tax_receipt_mode,
+          tax_prices_include: adminSettings.tax_prices_include,
+          tax_rounding_policy: adminSettings.tax_rounding_policy,
+        })
+        .eq("id", adminSettings.id);
+      if (restored.error) throw restored.error;
+    }
   });
 });

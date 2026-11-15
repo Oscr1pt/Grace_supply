@@ -58,7 +58,9 @@ function mapSalesRecord(row: Record<string, unknown>): SalesHistoryRecord {
   return {
     id: String(row.id),
     receiptNo: String(row.receipt_no ?? ""),
-    clientId: String(row.client_id ?? ""),
+    clientId: typeof row.client_id === "string" ? row.client_id : null,
+    clientNameSnapshot:
+      typeof row.client_name_snapshot === "string" ? row.client_name_snapshot : null,
     clientName: typeof row.client_name === "string" ? row.client_name : null,
     pieceCount: Number(row.piece_count ?? 0),
     lines: [],

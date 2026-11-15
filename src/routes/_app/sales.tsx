@@ -50,10 +50,15 @@ import { loadSaleHistoryLines, useSalesHistory } from "@/lib/historyQueries";
 import type { HistoryPeriod } from "@/lib/historyDateRange.js";
 
 export const Route = createFileRoute("/_app/sales")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    new: search.new === "1" ? "1" : undefined,
+  }),
   component: SalesPage,
 });
 
 function SalesPage() {
+  const { new: newSaleIntent } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const [historySearch, setHistorySearch] = useState("");
   const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriod>("all");
   const [historyFrom, setHistoryFrom] = useState("");
@@ -89,7 +94,8 @@ function SalesPage() {
   const submitLock = useRef(false);
   const annulLock = useRef(false);
   const [settings] = useSettings();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const canCreateSales = can("sales");
   const [taxPolicyState, setTaxPolicyState] = useState<
     "loading" | "unknown" | "blocked" | "unsupported" | "approved"
   >("loading");
@@ -101,7 +107,9 @@ function SalesPage() {
   const annulKeys = useRef(new Map<string, string>());
 
   const [open, setOpen] = useState(false);
+  const [customerMode, setCustomerMode] = useState<"registered" | "occasional">("registered");
   const [clientId, setClientId] = useState("");
+  const [walkInName, setWalkInName] = useState("");
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [pickItem, setPickItem] = useState("");
   const [paymentType, setPaymentType] = useState<"contado" | "credito">("contado");
@@ -118,6 +126,14 @@ function SalesPage() {
   const [pending, setPending] = useState(false);
   const [needsReconciliation, setNeedsReconciliation] = useState(false);
   const [saleValidationErrors, setSaleValidationErrors] = useState<Record<string, string>>({});
+  const newSaleIntentHandled = useRef(false);
+
+  const clearNewSaleIntent = useCallback(() => {
+    void navigate({
+      search: (previous) => ({ ...previous, new: undefined }),
+      replace: true,
+    });
+  }, [navigate]);
 
   const refreshTaxPolicy = useCallback(async () => {
     const request = ++policyRequest.current;
@@ -195,12 +211,16 @@ function SalesPage() {
       setOpen(true);
       if (operation.context && typeof operation.context === "object") {
         const context = operation.context as {
+          customerMode?: "registered" | "occasional";
           clientId?: string;
+          walkInName?: string;
           lines?: SaleLine[];
           paymentType?: "contado" | "credito";
           dueDate?: string;
         };
+        if (context.customerMode) setCustomerMode(context.customerMode);
         if (context.clientId) setClientId(context.clientId);
+        if (context.walkInName) setWalkInName(context.walkInName);
         if (Array.isArray(context.lines)) setLines(context.lines);
         if (context.paymentType) setPaymentType(context.paymentType);
         if (context.dueDate) setDueDate(context.dueDate);
@@ -215,6 +235,37 @@ function SalesPage() {
       );
     }
   }, [user?.authUserId]);
+
+  useEffect(() => {
+    if (newSaleIntent !== "1") {
+      newSaleIntentHandled.current = false;
+      return;
+    }
+    if (newSaleIntentHandled.current || !user?.authUserId || taxPolicyState === "loading") return;
+
+    newSaleIntentHandled.current = true;
+    clearNewSaleIntent();
+    if (!canCreateSales) {
+      toast.error("Tu cuenta no tiene permiso para registrar ventas.");
+      return;
+    }
+    if (pendingOperationType) {
+      toast.error("Resuelve la operación pendiente antes de iniciar otra venta.");
+      return;
+    }
+    if (taxPolicyState !== "approved") {
+      toast.error("La política tributaria vigente no permite iniciar una venta.");
+      return;
+    }
+    setOpen(true);
+  }, [
+    canCreateSales,
+    clearNewSaleIntent,
+    newSaleIntent,
+    pendingOperationType,
+    taxPolicyState,
+    user?.authUserId,
+  ]);
 
   const saleTaxPreview = calculateSaleTax(
     lines.map((line) => ({
@@ -289,7 +340,9 @@ function SalesPage() {
   };
 
   const reset = () => {
+    setCustomerMode("registered");
     setClientId("");
+    setWalkInName("");
     setLines([]);
     setPickItem("");
     setPaymentType("contado");
@@ -297,9 +350,33 @@ function SalesPage() {
     setSaleValidationErrors({});
   };
 
+  const changeCustomerMode = (nextMode: "registered" | "occasional") => {
+    setCustomerMode(nextMode);
+    setClientId("");
+    setWalkInName("");
+    if (nextMode === "occasional" && paymentType === "credito") {
+      setPaymentType("contado");
+      setDueDate("");
+    }
+    setSaleValidationErrors({});
+  };
+
   const save = async () => {
     if (submitLock.current || pending || needsReconciliation || pendingOperationType) return;
-    const errors = validateSaleDraft({ clientId, clients, lines, inventory, paymentType, dueDate });
+    if (!canCreateSales) {
+      toast.error("Tu cuenta no tiene permiso para registrar ventas.");
+      return;
+    }
+    const errors = validateSaleDraft({
+      customerMode,
+      clientId,
+      walkInName,
+      clients,
+      lines,
+      inventory,
+      paymentType,
+      dueDate,
+    });
     setSaleValidationErrors(errors);
     if (Object.keys(errors).length) {
       toast.error(Object.values(errors)[0]);
@@ -330,7 +407,8 @@ function SalesPage() {
       requestKey.current = idempotencyKey;
       const request = {
         idempotency_key: idempotencyKey,
-        client_id: clientId,
+        client_id: customerMode === "registered" ? clientId : null,
+        walk_in_name: customerMode === "occasional" ? walkInName.trim() : null,
         payment_type: paymentType,
         due_date: paymentType === "credito" ? dueDate || null : null,
         lines: lines.map((line) => ({
@@ -345,7 +423,7 @@ function SalesPage() {
         type: "sale",
         idempotencyKey,
         request,
-        context: { clientId, paymentType, dueDate, lines },
+        context: { customerMode, clientId, walkInName, paymentType, dueDate, lines },
       });
       setPendingOperationType("sale");
       const result = await postBusinessOperation("sale", request);
@@ -358,7 +436,9 @@ function SalesPage() {
       const sale: Sale = {
         id: String(result.sale_id),
         receiptNo: String(result.receipt_no),
-        clientId: String(result.client_id ?? clientId),
+        clientId: typeof result.client_id === "string" ? result.client_id : null,
+        clientNameSnapshot:
+          typeof result.client_name_snapshot === "string" ? result.client_name_snapshot : null,
         lines: savedLines.map((line) => ({
           itemId: String(line.item_id),
           sku: String(line.sku),
@@ -427,7 +507,9 @@ function SalesPage() {
       const sale: Sale = {
         id: String(result.sale_id),
         receiptNo: String(result.receipt_no),
-        clientId: String(result.client_id),
+        clientId: typeof result.client_id === "string" ? result.client_id : null,
+        clientNameSnapshot:
+          typeof result.client_name_snapshot === "string" ? result.client_name_snapshot : null,
         lines: savedLines.map((line) => ({
           itemId: String(line.item_id),
           sku: String(line.sku),
@@ -695,19 +777,23 @@ function SalesPage() {
             open={open}
             onOpenChange={(o) => {
               if (!o && (needsReconciliation || pending || pendingOperationType === "sale")) return;
+              if (o && !canCreateSales) return;
               if (o && taxPolicyState !== "approved") return;
               setOpen(o);
+              if (!o) clearNewSaleIntent();
             }}
           >
-            <DialogTrigger asChild>
-              <Button
-                disabled={taxPolicyState !== "approved" || Boolean(pendingOperationType)}
-                className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0"
-              >
-                <Plus className="h-4 w-4 mr-1.5" />{" "}
-                {taxPolicyState === "approved" ? "Nueva venta" : "Ventas no disponibles"}
-              </Button>
-            </DialogTrigger>
+            {canCreateSales && (
+              <DialogTrigger asChild>
+                <Button
+                  disabled={taxPolicyState !== "approved" || Boolean(pendingOperationType)}
+                  className="bg-[#D4AF37] text-black hover:bg-[#E5C158] font-semibold border-0"
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />{" "}
+                  {taxPolicyState === "approved" ? "Nueva venta" : "Ventas no disponibles"}
+                </Button>
+              </DialogTrigger>
+            )}
             <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Nueva venta</DialogTitle>
@@ -749,64 +835,135 @@ function SalesPage() {
                     Cargando artículos activos y existencias…
                   </p>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="sale-client">Cliente activo</Label>
+                    <Label htmlFor="sale-customer-mode">Tipo de cliente</Label>
                     <Select
-                      value={clientId}
-                      onValueChange={(value) => {
-                        setClientId(value);
-                        setSaleValidationErrors({});
-                      }}
+                      value={customerMode}
+                      onValueChange={(value) =>
+                        changeCustomerMode(value as "registered" | "occasional")
+                      }
                     >
-                      <SelectTrigger id="sale-client">
-                        <SelectValue
-                          placeholder={
-                            clients.length ? "Elige un cliente" : "No hay clientes disponibles"
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clients
-                          .filter((c) => c.status === "activo")
-                          .map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.name} · ID {c.id.slice(0, 8)}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      El identificador UUID evita confundir clientes con nombres iguales.
-                    </p>
-                    {saleValidationErrors.clientId && (
-                      <p role="alert" className="text-xs text-destructive">
-                        {saleValidationErrors.clientId}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label>Método de Pago</Label>
-                    <Select
-                      value={paymentType}
-                      onValueChange={(v) => {
-                        setPaymentType(v as "contado" | "credito");
-                        setSaleValidationErrors({});
-                      }}
-                    >
-                      <SelectTrigger>
+                      <SelectTrigger id="sale-customer-mode">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="contado">Contado (Inmediato)</SelectItem>
-                        <SelectItem value="credito">Crédito (Genera Deuda)</SelectItem>
+                        <SelectItem value="registered">Cliente registrado</SelectItem>
+                        <SelectItem value="occasional">Cliente ocasional</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  {customerMode === "registered" ? (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="sale-client">Cliente activo</Label>
+                      <Select
+                        value={clientId}
+                        onValueChange={(value) => {
+                          setClientId(value);
+                          setSaleValidationErrors({});
+                        }}
+                      >
+                        <SelectTrigger id="sale-client">
+                          <SelectValue
+                            placeholder={
+                              clients.length ? "Elige un cliente" : "No hay clientes disponibles"
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {clients
+                            .filter((c) => c.status === "activo")
+                            .map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.name} · ID {c.id.slice(0, 8)}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        El UUID identifica al cliente aunque haya nombres iguales.
+                      </p>
+                      {saleValidationErrors.clientId && (
+                        <p role="alert" className="text-xs text-destructive">
+                          {saleValidationErrors.clientId}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="sale-walk-in-name">Nombre del cliente ocasional</Label>
+                      <Input
+                        id="sale-walk-in-name"
+                        value={walkInName}
+                        maxLength={160}
+                        autoComplete="name"
+                        aria-invalid={Boolean(saleValidationErrors.walkInName)}
+                        aria-describedby={
+                          saleValidationErrors.walkInName
+                            ? "sale-walk-in-name-error"
+                            : "sale-walk-in-name-help"
+                        }
+                        onChange={(event) => {
+                          setWalkInName(event.target.value);
+                          setSaleValidationErrors({});
+                        }}
+                      />
+                      <p id="sale-walk-in-name-help" className="text-xs text-muted-foreground">
+                        El nombre se conserva en esta venta y no crea una ficha en Clientes.
+                      </p>
+                      {saleValidationErrors.walkInName && (
+                        <p
+                          id="sale-walk-in-name-error"
+                          role="alert"
+                          className="text-xs text-destructive"
+                        >
+                          {saleValidationErrors.walkInName}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label
+                      htmlFor={customerMode === "registered" ? "sale-payment-type" : undefined}
+                    >
+                      Método de pago
+                    </Label>
+                    {customerMode === "registered" ? (
+                      <Select
+                        value={paymentType}
+                        onValueChange={(value) => {
+                          setPaymentType(value as "contado" | "credito");
+                          setSaleValidationErrors({});
+                        }}
+                      >
+                        <SelectTrigger id="sale-payment-type">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="contado">Contado (Inmediato)</SelectItem>
+                          <SelectItem value="credito">Crédito (Genera Deuda)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p
+                        id="sale-payment-type"
+                        className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm"
+                      >
+                        Contado (Inmediato)
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground">
-                      Contado se paga inmediatamente. Crédito crea una cuenta por cobrar para el
-                      cliente.
+                      {customerMode === "registered"
+                        ? "El crédito requiere un cliente registrado y activo."
+                        : "Las ventas a clientes ocasionales solo se permiten al contado."}
                     </p>
+                    {saleValidationErrors.paymentType && (
+                      <p role="alert" className="text-xs text-destructive">
+                        {saleValidationErrors.paymentType}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -1095,7 +1252,9 @@ function SalesPage() {
               sales.map((s) => (
                 <tr key={s.id} className="border-t border-border hover:bg-muted/30">
                   <td className="px-4 py-3 font-mono text-xs">{s.receiptNo}</td>
-                  <td className="px-4 py-3">{s.clientName || clientName(s.clientId)}</td>
+                  <td className="px-4 py-3">
+                    {s.clientName || (s.clientId ? clientName(s.clientId) : "Cliente")}
+                  </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {fmtDate(s.createdAt)}
                   </td>
@@ -1280,7 +1439,10 @@ function ReceiptDialog({
   const { data: clients } = useSupabaseView("sales_client_lookup");
   if (!sale) return null;
   const client = clients.find((c) => c.id === sale.clientId);
-  const historyClientName = "clientName" in sale ? sale.clientName : null;
+  const historyClientName =
+    "clientName" in sale && typeof sale.clientName === "string" ? sale.clientName : null;
+  const displayedClientName =
+    sale.clientNameSnapshot || historyClientName || client?.name || "Cliente";
   return (
     <Dialog open={!!sale} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
@@ -1325,11 +1487,7 @@ function ReceiptDialog({
             <div className="flex justify-between text-xs mt-3">
               <div>
                 <div className="text-gray-500 uppercase tracking-wider">Cliente</div>
-                <div className="font-medium text-sm">
-                  {client?.name ||
-                    (typeof historyClientName === "string" ? historyClientName : null) ||
-                    "Mostrador"}
-                </div>
+                <div className="font-medium text-sm">{displayedClientName}</div>
               </div>
               <div className="text-right">
                 <div className="text-gray-500 uppercase tracking-wider">Recibo</div>

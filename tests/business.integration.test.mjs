@@ -17,12 +17,15 @@ const service =
     : null;
 let admin;
 let employee;
+let noSalesEmployee;
 let clientId;
 let supplierId;
 let itemId;
 let failItemId;
 let failAdjustItemId;
 let testSettings;
+const extraSalesItems = [];
+const extraClients = [];
 
 const integration = test.describe("local atomic financial operations", { skip: !enabled }, () => {
   before(async () => {
@@ -53,6 +56,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
         ],
       },
       { key: "sales", role: "employee", permissions: ["sales"] },
+      { key: "no-sales", role: "employee", permissions: ["dashboard"] },
     ]) {
       const email = `chg07-${identity.key}-${suffix}@example.test`;
       const created = await service.auth.admin.createUser({ email, password, email_confirm: true });
@@ -67,7 +71,8 @@ const integration = test.describe("local atomic financial operations", { skip: !
       });
       assert.ifError(profile.error);
       if (identity.key === "admin") admin = { id: created.data.user.id, email };
-      else employee = { id: created.data.user.id, email };
+      else if (identity.key === "sales") employee = { id: created.data.user.id, email };
+      else noSalesEmployee = { id: created.data.user.id, email };
     }
 
     const client = await service
@@ -222,7 +227,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
         await service.from("purchases").delete().eq("id", purchase.id);
       }
     }
-    for (const id of [itemId, failItemId, failAdjustItemId]) {
+    for (const id of [itemId, failItemId, failAdjustItemId, ...extraSalesItems]) {
       if (id) {
         const sales = await service.from("sale_lines").select("sale_id").eq("item_id", id);
         const saleIds = [...new Set((sales.data ?? []).map((row) => row.sale_id))];
@@ -238,6 +243,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
         await service.from("inventory").delete().eq("id", id);
       }
     }
+    if (extraClients.length) await service.from("clients").delete().in("id", extraClients);
     if (clientId) await service.from("clients").delete().eq("id", clientId);
     if (supplierId) await service.from("suppliers").delete().eq("id", supplierId);
     if (testSettings) {
@@ -255,7 +261,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
         })
         .eq("id", testSettings.id);
     }
-    for (const identity of [employee, admin]) {
+    for (const identity of [employee, noSalesEmployee, admin]) {
       if (!identity) continue;
       await service.from("user_profiles").delete().eq("auth_user_id", identity.id);
       await service.auth.admin.deleteUser(identity.id);
@@ -1613,5 +1619,241 @@ const integration = test.describe("local atomic financial operations", { skip: !
       .eq("operation_type", "inventory_adjustment")
       .eq("idempotency_key", key);
     assert.equal(operation.data.length, 0);
+  });
+
+  test("walk-in cash sales snapshot the entered name without linking clients and reject credit atomically", async () => {
+    const actor = await signedIn(employee);
+    const item = await service
+      .from("inventory")
+      .insert({
+        sku: "CHG34-" + suffix,
+        kind: "joya",
+        name: "CHG34 synthetic item " + suffix,
+        category: "otro",
+        cost_price: 40,
+        price: 100.05,
+        quantity: 0,
+        tax_classification: "gravado",
+      })
+      .select("id")
+      .single();
+    assert.ifError(item.error);
+    const walkInItemId = item.data.id;
+    extraSalesItems.push(walkInItemId);
+    const seededStock = await (
+      await signedIn(admin)
+    ).rpc("adjust_inventory", {
+      p_request: {
+        idempotency_key: crypto.randomUUID(),
+        item_id: walkInItemId,
+        delta: 3,
+        reason: "Synthetic CHG-34 walk-in sale fixture stock",
+      },
+    });
+    assert.ifError(seededStock.error);
+    const name = "CHG34 Mostrador " + suffix;
+    const sameNameClient = await service.from("clients").insert({ name }).select("id").single();
+    assert.ifError(sameNameClient.error);
+    extraClients.push(sameNameClient.data.id);
+    const snapshot = await service
+      .from("settings")
+      .select("tax_calculation_enabled")
+      .eq("id", testSettings.id)
+      .single();
+    assert.ifError(snapshot.error);
+    const enabledPolicy = await service
+      .from("settings")
+      .update({ tax_calculation_enabled: true })
+      .eq("id", testSettings.id);
+    assert.ifError(enabledPolicy.error);
+
+    try {
+      const firstRequest = {
+        idempotency_key: crypto.randomUUID(),
+        client_id: null,
+        walk_in_name: name,
+        payment_type: "contado",
+        lines: [{ item_id: walkInItemId, quantity: 1, expected_unit_price: "100.05" }],
+      };
+      const first = await actor.rpc("post_sale", { p_request: firstRequest });
+      assert.ifError(first.error);
+      assert.equal(first.data.client_id, null);
+      assert.equal(first.data.client_name_snapshot, name);
+      assert.equal(first.data.subtotal, "100.05");
+      assert.equal(first.data.tax, "18.01");
+      assert.equal(first.data.total, "118.06");
+
+      const replay = await actor.rpc("post_sale", { p_request: firstRequest });
+      assert.ifError(replay.error);
+      assert.deepEqual(replay.data, first.data);
+
+      const second = await actor.rpc("post_sale", {
+        p_request: { ...firstRequest, idempotency_key: crypto.randomUUID() },
+      });
+      assert.ifError(second.error);
+      assert.notEqual(second.data.sale_id, first.data.sale_id);
+      assert.equal(second.data.client_id, null);
+      assert.equal(second.data.client_name_snapshot, name);
+      const stockedAfterWalkIns = await service
+        .from("inventory")
+        .select("quantity")
+        .eq("id", walkInItemId)
+        .single();
+      assert.ifError(stockedAfterWalkIns.error);
+      assert.equal(stockedAfterWalkIns.data.quantity, 1);
+
+      const clients = await service.from("clients").select("id").eq("name", name);
+      assert.ifError(clients.error);
+      assert.equal(clients.data.length, 1, "walk-in posting never creates a client row");
+
+      const history = await actor.rpc("search_sales_history", {
+        p_search: name,
+        p_page: 1,
+      });
+      assert.ifError(history.error);
+      assert.equal(history.data.total_count, 2);
+      assert.ok(
+        history.data.records.every(
+          (record) =>
+            record.client_name === name &&
+            record.client_name_snapshot === name &&
+            record.client_id === null,
+        ),
+      );
+
+      const beforeCredit = await service
+        .from("sales")
+        .select("id")
+        .eq("client_name_snapshot", name);
+      assert.ifError(beforeCredit.error);
+      const beforeStock = await service
+        .from("inventory")
+        .select("quantity")
+        .eq("id", walkInItemId)
+        .single();
+      assert.ifError(beforeStock.error);
+      const creditKey = crypto.randomUUID();
+      const rejectedCredit = await actor.rpc("post_sale", {
+        p_request: {
+          idempotency_key: creditKey,
+          client_id: null,
+          walk_in_name: name,
+          payment_type: "credito",
+          due_date: "2026-12-31",
+          lines: [{ item_id: walkInItemId, quantity: 1, expected_unit_price: "100.05" }],
+        },
+      });
+      assert.equal(rejectedCredit.error?.code, "23514");
+
+      const afterCredit = await service.from("sales").select("id").eq("client_name_snapshot", name);
+      assert.equal(afterCredit.data.length, beforeCredit.data.length);
+      const afterStock = await service
+        .from("inventory")
+        .select("quantity")
+        .eq("id", walkInItemId)
+        .single();
+      assert.equal(afterStock.data.quantity, beforeStock.data.quantity);
+      const rejectedOperation = await service
+        .from("business_operations")
+        .select("id")
+        .eq("actor_id", employee.id)
+        .eq("idempotency_key", creditKey);
+      assert.equal(rejectedOperation.data.length, 0);
+
+      const blankName = await actor.rpc("post_sale", {
+        p_request: {
+          idempotency_key: crypto.randomUUID(),
+          client_id: null,
+          walk_in_name: "   ",
+          payment_type: "contado",
+          lines: [{ item_id: walkInItemId, quantity: 1, expected_unit_price: "100.05" }],
+        },
+      });
+      assert.equal(blankName.error?.code, "22023");
+    } finally {
+      await service
+        .from("settings")
+        .update({ tax_calculation_enabled: snapshot.data.tax_calculation_enabled })
+        .eq("id", testSettings.id);
+    }
+  });
+
+  test("post_sale rejects anonymous and non-sales callers before creating walk-in records", async () => {
+    const name = "CHG34 unauthorized " + suffix;
+    const before = await service.from("inventory").select("quantity").eq("id", itemId).single();
+    assert.ifError(before.error);
+    const request = {
+      idempotency_key: crypto.randomUUID(),
+      client_id: null,
+      walk_in_name: name,
+      payment_type: "contado",
+      lines: [{ item_id: itemId, quantity: 1, expected_unit_price: "100.00" }],
+    };
+    const anonymous = createClient(url, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const anonymousResult = await anonymous.rpc("post_sale", { p_request: request });
+    assert.ok(anonymousResult.error, "anonymous RPC calls must be rejected");
+
+    const unauthorized = await signedIn(noSalesEmployee);
+    const unauthorizedResult = await unauthorized.rpc("post_sale", {
+      p_request: { ...request, idempotency_key: crypto.randomUUID() },
+    });
+    assert.equal(unauthorizedResult.error?.code, "42501");
+
+    const rows = await service.from("sales").select("id").eq("client_name_snapshot", name);
+    assert.ifError(rows.error);
+    assert.equal(rows.data.length, 0);
+    const after = await service.from("inventory").select("quantity").eq("id", itemId).single();
+    assert.equal(after.data.quantity, before.data.quantity);
+  });
+
+  test("registered sales retain their UUID and snapshot when the client name changes", async () => {
+    const actor = await signedIn(employee);
+    const beforeClient = await service.from("clients").select("name").eq("id", clientId).single();
+    assert.ifError(beforeClient.error);
+    const sale = await actor.rpc("post_sale", {
+      p_request: {
+        idempotency_key: crypto.randomUUID(),
+        client_id: clientId,
+        payment_type: "contado",
+        lines: [{ item_id: itemId, quantity: 1, expected_unit_price: "100.00" }],
+      },
+    });
+    assert.ifError(sale.error);
+    assert.equal(sale.data.client_id, clientId);
+    assert.equal(sale.data.client_name_snapshot, beforeClient.data.name);
+
+    try {
+      const rename = await service
+        .from("clients")
+        .update({ name: "CHG34 renamed " + suffix })
+        .eq("id", clientId);
+      assert.ifError(rename.error);
+      const persisted = await service
+        .from("sales")
+        .select("client_id,client_name_snapshot")
+        .eq("id", sale.data.sale_id)
+        .single();
+      assert.deepEqual(persisted.data, {
+        client_id: clientId,
+        client_name_snapshot: beforeClient.data.name,
+      });
+      const history = await actor.rpc("search_sales_history", {
+        p_search: beforeClient.data.name,
+        p_page: 1,
+      });
+      assert.ifError(history.error);
+      assert.ok(
+        history.data.records.some(
+          (record) =>
+            record.id === sale.data.sale_id &&
+            record.client_name === beforeClient.data.name &&
+            record.client_name_snapshot === beforeClient.data.name,
+        ),
+      );
+    } finally {
+      await service.from("clients").update({ name: beforeClient.data.name }).eq("id", clientId);
+    }
   });
 });

@@ -5,9 +5,25 @@ function validDateOnly(value) {
   return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 }
 
-export function validateSaleDraft({ clientId, clients, lines, inventory, paymentType, dueDate }) {
+export function validateSaleDraft({
+  customerMode = "registered",
+  clientId,
+  walkInName = "",
+  clients,
+  lines,
+  inventory,
+  paymentType,
+  dueDate,
+}) {
   const errors = {};
-  if (!clients.some((client) => client.id === clientId && client.status === "activo")) {
+  if (customerMode === "occasional") {
+    const name = typeof walkInName === "string" ? walkInName.trim() : "";
+    if (!name) errors.walkInName = "Escribe el nombre del cliente ocasional.";
+    else if (name.length > 160) errors.walkInName = "El nombre no puede superar 160 caracteres.";
+    if (paymentType !== "contado") {
+      errors.paymentType = "Las ventas a clientes ocasionales solo se permiten al contado.";
+    }
+  } else if (!clients.some((client) => client.id === clientId && client.status === "activo")) {
     errors.clientId = "Selecciona un cliente activo.";
   }
   if (!lines.length) errors.lines = "Agrega al menos un artículo.";

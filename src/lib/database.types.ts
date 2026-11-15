@@ -111,7 +111,8 @@ export type Database = {
       sales: Table<
         TimestampRow & {
           receipt_no: string;
-          client_id: UUID;
+          client_id: UUID | null;
+          client_name_snapshot: string | null;
           subtotal: Numeric;
           tax_rate: Numeric;
           tax: Numeric;
@@ -125,7 +126,7 @@ export type Database = {
           voided_by: UUID | null;
           void_reason: string | null;
         },
-        "receipt_no" | "client_id" | "subtotal" | "total",
+        "receipt_no" | "subtotal" | "total",
         [FK<"sales_client_id_fkey", "client_id", "clients">]
       >;
       sale_lines: Table<

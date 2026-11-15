@@ -72,7 +72,8 @@ export type SaleLine = {
 export type Sale = {
   id: string;
   receiptNo: string;
-  clientId: string;
+  clientId: string | null;
+  clientNameSnapshot?: string | null;
   lines: SaleLine[];
   subtotal: number;
   taxRate: number;
@@ -145,10 +146,11 @@ type CreditPaymentBase = {
   createdAt: string;
 };
 
-export type CreditPayment = CreditPaymentBase & (
-  | { clientCreditId: string; supplierCreditId?: never }
-  | { supplierCreditId: string; clientCreditId?: never }
-);
+export type CreditPayment = CreditPaymentBase &
+  (
+    | { clientCreditId: string; supplierCreditId?: never }
+    | { supplierCreditId: string; clientCreditId?: never }
+  );
 
 export type ExpenseCategory =
   | "nomina"

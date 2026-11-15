@@ -97,3 +97,50 @@ test("a quick cash purchase permits no supplier while credit still requires a re
     /proveedor registrado y activo/i,
   );
 });
+
+test("walk-in sale validation accepts a named cash customer without client registration", () => {
+  assert.deepEqual(
+    validateSaleDraft({
+      customerMode: "occasional",
+      clientId: "",
+      walkInName: "  Cliente de mostrador  ",
+      clients: [],
+      lines: [{ itemId: product.id, unitPrice: 25, quantity: 1, name: product.name }],
+      inventory: [product],
+      paymentType: "contado",
+      dueDate: "",
+    }),
+    {},
+  );
+});
+
+test("walk-in sale validation requires a trimmed name of at most 160 characters and rejects credit", () => {
+  const draft = {
+    customerMode: "occasional",
+    clientId: "",
+    walkInName: "Mostrador",
+    clients: [],
+    lines: [{ itemId: product.id, unitPrice: 25, quantity: 1, name: product.name }],
+    inventory: [product],
+    paymentType: "contado",
+    dueDate: "",
+  };
+  assert.match(validateSaleDraft({ ...draft, walkInName: "   " }).walkInName, /nombre/i);
+  assert.match(validateSaleDraft({ ...draft, walkInName: "n".repeat(161) }).walkInName, /160/);
+  assert.match(validateSaleDraft({ ...draft, paymentType: "credito" }).paymentType, /contado/i);
+});
+
+test("registered sale validation still requires an active UUID for cash and credit", () => {
+  const draft = {
+    customerMode: "registered",
+    clientId: client.id,
+    walkInName: "",
+    clients: [client],
+    lines: [{ itemId: product.id, unitPrice: 25, quantity: 1, name: product.name }],
+    inventory: [product],
+    paymentType: "credito",
+    dueDate: "",
+  };
+  assert.equal(validateSaleDraft(draft).clientId, undefined);
+  assert.equal(validateSaleDraft({ ...draft, paymentType: "contado" }).clientId, undefined);
+});

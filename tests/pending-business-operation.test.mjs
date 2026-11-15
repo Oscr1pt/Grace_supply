@@ -40,6 +40,35 @@ test("a pending financial operation is retained for the same actor and cannot be
   assert.equal(readPendingBusinessOperation(storage, "actor-b"), null);
 });
 
+test("an uncertain walk-in sale retains its name and idempotency key", () => {
+  const storage = memoryStorage();
+  const operation = {
+    type: "sale",
+    idempotencyKey: "walk-in-stable-key",
+    request: {
+      client_id: null,
+      walk_in_name: "Cliente ocasional de prueba",
+      payment_type: "contado",
+      lines: [{ item_id: "item-a", quantity: 1, expected_unit_price: "25.00" }],
+    },
+    context: {
+      customerMode: "occasional",
+      clientId: null,
+      walkInName: "Cliente ocasional de prueba",
+      paymentType: "contado",
+    },
+  };
+
+  persistPendingBusinessOperation(storage, "actor-a", operation);
+  const restored = readPendingBusinessOperation(storage, "actor-a");
+  assert.deepEqual(restored, { ...operation, actorId: "actor-a" });
+  assert.equal(clearPendingBusinessOperation(storage, "actor-a", "wrong-key"), false);
+  assert.equal(
+    readPendingBusinessOperation(storage, "actor-a").idempotencyKey,
+    "walk-in-stable-key",
+  );
+});
+
 test("only the matching confirmed operation can clear the retained intent", () => {
   const storage = memoryStorage();
   persistPendingBusinessOperation(storage, "actor-a", {
