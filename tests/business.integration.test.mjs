@@ -224,6 +224,7 @@ const integration = test.describe("local atomic financial operations", { skip: !
           await service.from("credit_payments").delete().eq("supplier_credit_id", credit.id);
           await service.from("supplier_credits").delete().eq("id", credit.id);
         }
+        await service.from("purchase_lines").delete().eq("purchase_id", purchase.id);
         await service.from("purchases").delete().eq("id", purchase.id);
       }
     }

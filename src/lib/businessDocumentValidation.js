@@ -54,6 +54,25 @@ export function validateSaleDraft({
   return errors;
 }
 
+export function calculatePurchaseTotalCents(lines) {
+  if (!Array.isArray(lines)) return 0;
+  return lines.reduce((total, line) => {
+    const quantity = Number(line?.quantity);
+    const unitCost = Number(line?.unitCost);
+    if (
+      !Number.isSafeInteger(quantity) ||
+      quantity < 1 ||
+      !Number.isFinite(unitCost) ||
+      unitCost < 0 ||
+      Math.round(unitCost * 100) !== unitCost * 100
+    ) {
+      return total;
+    }
+    const subtotal = Math.round(unitCost * 100) * quantity;
+    return Number.isSafeInteger(total + subtotal) ? total + subtotal : total;
+  }, 0);
+}
+
 export function validatePurchaseDraft({
   supplierId,
   supplierName,
@@ -68,6 +87,7 @@ export function validatePurchaseDraft({
   unitCost,
   restock,
   quickPurchase = false,
+  lines,
 }) {
   const errors = {};
   const supplier = quickPurchase ? null : suppliers.find((entry) => entry.id === supplierId);
@@ -85,19 +105,112 @@ export function validatePurchaseDraft({
   if (paymentType === "credito" && !validDateOnly(dueDate)) {
     errors.dueDate = "Escribe una fecha de vencimiento válida.";
   }
-  if (!description.trim() && !itemId) {
-    errors.description = "Describe la compra o vincula un artículo de inventario.";
+  if (Array.isArray(lines)) {
+    if (lines.length < 1) errors.lines = "Agrega al menos un producto a la compra.";
+    else if (lines.length > 100) errors.lines = "Una compra admite hasta 100 productos.";
+    else {
+      const lineErrors = {};
+      const itemIds = new Set();
+      let totalCents = 0;
+      let firstLineError = "";
+      const addLineError = (line, index, field, reason) => {
+        const lineKey = typeof line?.key === "string" && line.key ? line.key : `line-${index + 1}`;
+        const message = `Línea ${index + 1}: ${reason}`;
+        lineErrors[lineKey] ??= {};
+        lineErrors[lineKey][field] = message;
+        firstLineError ||= message;
+      };
+      for (const [index, line] of lines.entries()) {
+        const manual = line?.kind === "manual";
+        const productId = typeof line?.itemId === "string" ? line.itemId : "";
+        let validLine = true;
+        if (manual) {
+          const name = typeof line?.manualName === "string" ? line.manualName : "";
+          const withoutBoundaryWhitespace = name.replace(/^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g, "");
+          if (!name || !name.replace(/[ \t\n\r\f\v]/g, "")) {
+            addLineError(
+              line,
+              index,
+              "manualName",
+              "escribe el nombre del producto no registrado.",
+            );
+            validLine = false;
+          } else if (withoutBoundaryWhitespace.length !== name.length) {
+            addLineError(
+              line,
+              index,
+              "manualName",
+              "elimina los espacios al inicio o al final del nombre.",
+            );
+            validLine = false;
+          } else if ([...name].length > 500) {
+            addLineError(line, index, "manualName", "el nombre supera los 500 caracteres.");
+            validLine = false;
+          }
+        } else {
+          const product = inventory.find((entry) => entry.id === productId);
+          if (!product) {
+            addLineError(
+              line,
+              index,
+              "itemId",
+              "selecciona un producto activo de inventario para esta línea vinculada.",
+            );
+            validLine = false;
+          }
+          if (product && itemIds.has(productId)) {
+            addLineError(
+              line,
+              index,
+              "itemId",
+              "este producto vinculado está duplicado en la misma compra.",
+            );
+            validLine = false;
+          }
+          if (product) itemIds.add(productId);
+        }
+        if (!Number.isSafeInteger(line.quantity) || line.quantity < 1) {
+          addLineError(line, index, "quantity", "la cantidad debe ser un entero mayor que cero.");
+          validLine = false;
+        }
+        const cost = Number(line.unitCost);
+        if (!Number.isFinite(cost) || cost < 0 || Math.round(cost * 100) !== cost * 100) {
+          addLineError(
+            line,
+            index,
+            "unitCost",
+            "el costo debe ser cero o mayor y tener hasta dos decimales.",
+          );
+          validLine = false;
+        }
+        if (!validLine) continue;
+        const subtotalCents = Math.round(cost * 100) * line.quantity;
+        totalCents += subtotalCents;
+        if (!Number.isSafeInteger(totalCents) || totalCents > 99_999_999_999_999) {
+          errors.lines = "El total de la compra supera el límite permitido.";
+          break;
+        }
+      }
+      if (Object.keys(lineErrors).length > 0) {
+        errors.lineErrors = lineErrors;
+        errors.lines = firstLineError;
+      }
+    }
+  } else {
+    if (!description.trim() && !itemId) {
+      errors.description = "Describe la compra o vincula un artículo de inventario.";
+    }
+    if (!Number.isSafeInteger(Number(quantity)) || Number(quantity) < 1) {
+      errors.quantity = "La cantidad debe ser un número entero mayor que cero.";
+    }
+    const cost = Number(unitCost);
+    if (!Number.isFinite(cost) || cost < 0 || Math.round(cost * 100) !== cost * 100) {
+      errors.unitCost = "El costo debe ser cero o mayor y tener hasta dos decimales.";
+    }
+    if (itemId && !inventory.some((item) => item.id === itemId)) {
+      errors.itemId = "El artículo activo no está disponible. Actualiza la lista.";
+    }
+    if (restock && !itemId) errors.restock = "Vincula un artículo para reabastecer existencias.";
   }
-  if (!Number.isSafeInteger(Number(quantity)) || Number(quantity) < 1) {
-    errors.quantity = "La cantidad debe ser un número entero mayor que cero.";
-  }
-  const cost = Number(unitCost);
-  if (!Number.isFinite(cost) || cost < 0 || Math.round(cost * 100) !== cost * 100) {
-    errors.unitCost = "El costo debe ser cero o mayor y tener hasta dos decimales.";
-  }
-  if (itemId && !inventory.some((item) => item.id === itemId)) {
-    errors.itemId = "El artículo activo no está disponible. Actualiza la lista.";
-  }
-  if (restock && !itemId) errors.restock = "Vincula un artículo para reabastecer existencias.";
   return errors;
 }

@@ -104,6 +104,19 @@ export type Purchase = {
   createdAt: string;
   voidedAt?: string;
   voidReason?: string;
+  lineCount?: number;
+  lineSummary?: Array<{ name: string; quantity: number; itemId?: string | null }>;
+};
+
+export type PurchaseHistoryLine = {
+  lineNumber: number;
+  itemId: string | null;
+  skuSnapshot: string | null;
+  nameSnapshot: string;
+  quantity: number;
+  unitCost: number;
+  subtotal: number;
+  restocked: boolean;
 };
 
 export type CreditStatus = "pendiente" | "parcial" | "pagada" | "vencida" | "anulada";

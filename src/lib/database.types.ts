@@ -153,8 +153,8 @@ export type Database = {
           supplier_id: UUID | null;
           item_id: UUID | null;
           description: string;
-          quantity: number;
-          unit_cost: Numeric;
+          quantity: number | null;
+          unit_cost: Numeric | null;
           total: Numeric;
           payment_type: "contado" | "credito" | null;
           invoice_no: string | null;
@@ -163,10 +163,28 @@ export type Database = {
           voided_by: UUID | null;
           void_reason: string | null;
         },
-        "supplier" | "quantity" | "unit_cost" | "total",
+        "supplier" | "total",
         [
           FK<"purchases_supplier_id_fkey", "supplier_id", "suppliers">,
           FK<"purchases_item_id_fkey", "item_id", "inventory">,
+        ]
+      >;
+      purchase_lines: Table<
+        TimestampRow & {
+          purchase_id: UUID;
+          line_number: number;
+          item_id: UUID | null;
+          sku_snapshot: string | null;
+          name_snapshot: string;
+          quantity: number;
+          unit_cost: Numeric;
+          subtotal: Numeric;
+          restocked: boolean;
+        },
+        "purchase_id" | "line_number" | "name_snapshot" | "quantity" | "unit_cost" | "subtotal",
+        [
+          FK<"purchase_lines_purchase_id_fkey", "purchase_id", "purchases">,
+          FK<"purchase_lines_item_id_fkey", "item_id", "inventory">,
         ]
       >;
       client_credits: Table<

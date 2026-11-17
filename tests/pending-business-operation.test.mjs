@@ -69,6 +69,74 @@ test("an uncertain walk-in sale retains its name and idempotency key", () => {
   );
 });
 
+test("an uncertain multi-line purchase restores every line and reuses its original request key", () => {
+  const firstSession = memoryStorage();
+  const operation = {
+    type: "purchase",
+    idempotencyKey: "purchase-multiline-stable-key",
+    request: {
+      supplier_id: "supplier-a",
+      invoice_no: "CHG35-UNCERTAIN-1",
+      restock: true,
+      lines: [
+        { item_id: "item-a", quantity: 2, unit_cost: "3.25" },
+        { item_id: null, name: "Servicio externo", quantity: 4, unit_cost: "7.50" },
+      ],
+    },
+    context: {
+      linkedLinesMode: true,
+      lines: [
+        {
+          key: "line-a",
+          kind: "linked",
+          itemId: "item-a",
+          manualName: "",
+          quantity: 2,
+          unitCost: 3.25,
+        },
+        {
+          key: "line-b",
+          kind: "manual",
+          itemId: "",
+          manualName: "Servicio externo",
+          quantity: 4,
+          unitCost: 7.5,
+        },
+      ],
+      restock: true,
+    },
+  };
+
+  persistPendingBusinessOperation(firstSession, "actor-purchase", operation);
+  const persistedValue = firstSession.getItem("grace.pending-business-operation.v1:actor-purchase");
+  const restoredSession = memoryStorage();
+  restoredSession.setItem("grace.pending-business-operation.v1:actor-purchase", persistedValue);
+
+  const restored = readPendingBusinessOperation(restoredSession, "actor-purchase");
+  assert.equal(restored.idempotencyKey, operation.idempotencyKey);
+  assert.deepEqual(restored.request.lines, operation.request.lines);
+  assert.deepEqual(restored.context.lines, operation.context.lines);
+  assert.equal(
+    clearPendingBusinessOperation(restoredSession, "actor-purchase", "different-key"),
+    false,
+  );
+  assert.throws(
+    () =>
+      persistPendingBusinessOperation(restoredSession, "actor-purchase", {
+        ...restored,
+        request: {
+          ...restored.request,
+          lines: restored.request.lines.map((line) => ({ ...line, quantity: line.quantity + 1 })),
+        },
+      }),
+    /clave de idempotencia/i,
+  );
+  assert.deepEqual(
+    readPendingBusinessOperation(restoredSession, "actor-purchase").request.lines,
+    operation.request.lines,
+  );
+});
+
 test("only the matching confirmed operation can clear the retained intent", () => {
   const storage = memoryStorage();
   persistPendingBusinessOperation(storage, "actor-a", {

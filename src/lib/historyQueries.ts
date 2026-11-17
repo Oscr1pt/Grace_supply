@@ -4,7 +4,7 @@ import { useAuth } from "./auth";
 import { resolveHistoryDateRange } from "./historyDateRange.js";
 import { fromDb, supabase } from "./supabase";
 import type { Database } from "./database.types";
-import type { Purchase, Sale, SaleLine } from "./types";
+import type { Purchase, PurchaseHistoryLine, Sale, SaleLine } from "./types";
 import type { HistoryPeriod } from "./historyDateRange.js";
 
 export type SalesHistoryRecord = Sale & {
@@ -79,14 +79,34 @@ function mapSalesRecord(row: Record<string, unknown>): SalesHistoryRecord {
 }
 
 function mapPurchaseRecord(row: Record<string, unknown>): Purchase {
+  const summary = Array.isArray(row.line_summary)
+    ? row.line_summary.flatMap((line) => {
+        if (!line || typeof line !== "object" || Array.isArray(line)) return [];
+        const value = line as Record<string, unknown>;
+        return typeof value.name === "string"
+          ? [
+              {
+                name: value.name,
+                quantity: Number(value.quantity ?? 0),
+                itemId:
+                  typeof value.item_id === "string"
+                    ? value.item_id
+                    : value.item_id === null
+                      ? null
+                      : undefined,
+              },
+            ]
+          : [];
+      })
+    : [];
   return {
     id: String(row.id),
     supplier: String(row.supplier ?? ""),
     supplierId: typeof row.supplier_id === "string" ? row.supplier_id : undefined,
     itemId: typeof row.item_id === "string" ? row.item_id : undefined,
     description: String(row.description ?? ""),
-    quantity: Number(row.quantity ?? 0),
-    unitCost: Number(row.unit_cost ?? 0),
+    quantity: row.quantity === null ? 0 : Number(row.quantity ?? 0),
+    unitCost: row.unit_cost === null ? 0 : Number(row.unit_cost ?? 0),
     total: Number(row.total ?? 0),
     paymentType: row.payment_type === "credito" ? "credito" : "contado",
     invoiceNo: typeof row.invoice_no === "string" ? row.invoice_no : undefined,
@@ -94,6 +114,8 @@ function mapPurchaseRecord(row: Record<string, unknown>): Purchase {
     createdAt: String(row.created_at ?? ""),
     voidedAt: typeof row.voided_at === "string" ? row.voided_at : undefined,
     voidReason: typeof row.void_reason === "string" ? row.void_reason : undefined,
+    lineCount: Number(row.line_count ?? 0),
+    lineSummary: summary,
   };
 }
 
@@ -227,4 +249,21 @@ export async function loadSaleHistoryLines(
     .abortSignal(signal);
   if (error) throw error;
   return (data ?? []).map((row) => fromDb<SaleLine>(row as Record<string, unknown>));
+}
+
+export async function loadPurchaseHistoryLines(
+  purchaseId: string,
+  signal: AbortSignal,
+): Promise<PurchaseHistoryLine[]> {
+  const { data, error } = await supabase
+    .from("purchase_lines")
+    .select("line_number,item_id,sku_snapshot,name_snapshot,quantity,unit_cost,subtotal,restocked")
+    .eq(
+      "purchase_id",
+      purchaseId as Database["public"]["Tables"]["purchase_lines"]["Row"]["purchase_id"],
+    )
+    .order("line_number", { ascending: true })
+    .abortSignal(signal);
+  if (error) throw error;
+  return (data ?? []).map((row) => fromDb<PurchaseHistoryLine>(row as Record<string, unknown>));
 }
