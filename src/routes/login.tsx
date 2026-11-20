@@ -15,7 +15,7 @@ export const Route = createFileRoute("/login")({
 const accountRecoveryEnabled = import.meta.env.VITE_ACCOUNT_RECOVERY_ENABLED === "true";
 
 function LoginPage() {
-  const { user, authReady, login, passwordSetupStatus } = useAuth();
+  const { user, authReady, login, passwordSetupStatus, idleExpiryMessage } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -132,6 +132,15 @@ function LoginPage() {
           </div>
 
           <form onSubmit={submit} noValidate aria-busy={busy || !authReady} className="space-y-5">
+            {idleExpiryMessage && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"
+              >
+                {idleExpiryMessage}
+              </div>
+            )}
             {errors.form && (
               <div
                 id="login-error"

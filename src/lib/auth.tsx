@@ -17,9 +17,34 @@ import { initialAuthCallback } from "./authCallback.js";
 import { setReadFailure, userPersistenceMessage } from "./persistence.js";
 import { createAuthorizationScopeKey } from "./sessionScope.js";
 import {
+  IDLE_EXPIRE_AFTER_MS,
+  IDLE_WARNING_AFTER_MS,
+  IDLE_WARNING_TICK_MS,
+  IdleSessionClock,
+  clearIdleActivity,
+  clearIdleExpiry,
+  formatIdleRemaining,
+  idleActivityStorageKey,
+  idleExpiryStorageKey,
+  isIdleExpiryPersisted,
+  isTrustedIdleActivity,
+  persistIdleActivity,
+  persistIdleExpiry,
+  restoreIdleActivity,
+} from "./idleSession.js";
+import {
   employeeActionErrorMessage,
   requireConfirmedEmployeeProfile,
 } from "./employeeManagement.js";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const PERMISSIONS = [
   { key: "dashboard", label: "Panel" },
@@ -81,6 +106,7 @@ type AuthCtx = {
   removeEmployee: (username: string) => Promise<void>;
   activateEmployee: (username: string) => Promise<void>;
   createEmployeeRecoveryLink: (username: string) => Promise<string>;
+  idleExpiryMessage: string | null;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -88,7 +114,7 @@ const INVALID_CREDENTIALS = "Usuario o contraseña inválidos";
 const AUTH_UNAVAILABLE = "No se pudo verificar la sesión. Intenta de nuevo.";
 
 class ProfileLoadError extends Error {
-  constructor() {
+  constructor(readonly status: number | null = null) {
     super(AUTH_UNAVAILABLE);
     this.name = "ProfileLoadError";
   }
@@ -131,6 +157,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [usersStatus, setUsersStatus] = useState<UserListStatus>("loading");
   const [usersError, setUsersError] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [idleWarningOpen, setIdleWarningOpen] = useState(false);
+  const [idleRemaining, setIdleRemaining] = useState("5:00");
+  const [idleExpiryMessage, setIdleExpiryMessage] = useState<string | null>(null);
   // Keep the server render and the browser's first render identical. Callback
   // state is derived after hydration so SSR cannot disagree with window.location.
   const [passwordSetupStatus, setPasswordSetupStatus] = useState<
@@ -146,10 +175,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const invalidationChannel = useRef<BroadcastChannel | null>(null);
   const passwordSetupIdentity = useRef<string | null>(null);
   const passwordSetupFlowActive = useRef(false);
+  const idleLocked = useRef(false);
+  const observedIdleIdentity = useRef<string | null>(null);
+  const idleContinueHandler = useRef<(() => void) | null>(null);
+
+  const blockIdleIdentity = useCallback(
+    (identity: string) => {
+      if (idleLocked.current) return;
+      // Lock and remove private UI state synchronously, before network logout.
+      idleLocked.current = true;
+      loginAttempt.current += 1;
+      authRevision.current += 1;
+      setIdleWarningOpen(false);
+      setAuthReady(true);
+      setIdleExpiryMessage(
+        "El acceso privado quedó bloqueado por inactividad. Inicia sesión nuevamente.",
+      );
+      clearLegacyLocalSessionAndDataCache();
+      currentIdentity.current = null;
+      currentAuthorizationKey.current = "anonymous";
+      initializedAuth.current = true;
+      setCacheGeneration((generation) => generation + 1);
+      setUser(null);
+      setUsers([]);
+      queryClient.clear();
+      try {
+        const storage = window.sessionStorage;
+        persistIdleExpiry(storage, idleExpiryStorageKey(identity));
+        clearIdleActivity(storage, idleActivityStorageKey(identity));
+      } catch {
+        // The in-memory lock remains authoritative if tab storage is unavailable.
+      }
+      void router.navigate({ to: "/login", replace: true }).catch(() => undefined);
+      void supabase.auth
+        .signOut({ scope: "local" })
+        .then(({ error }) => {
+          setIdleExpiryMessage(
+            error
+              ? "El acceso privado quedó bloqueado por inactividad, pero no se pudo confirmar el cierre local. Inicia sesión nuevamente cuando haya conexión."
+              : "Tu sesión se cerró por inactividad. Inicia sesión nuevamente",
+          );
+        })
+        .catch(() => {
+          setIdleExpiryMessage(
+            "El acceso privado quedó bloqueado por inactividad, pero no se pudo confirmar el cierre local. Inicia sesión nuevamente cuando haya conexión.",
+          );
+        });
+    },
+    [queryClient, router],
+  );
 
   const loadCurrentProfile = useCallback(async () => {
     const { data: authResult, error: authError } = await supabase.auth.getUser();
-    if (authError) throw new ProfileLoadError();
+    if (authError) {
+      const status = typeof authError.status === "number" ? authError.status : null;
+      throw new ProfileLoadError(status);
+    }
     if (!authResult.user?.email_confirmed_at) return null;
 
     const { data, error } = await supabase
@@ -196,10 +277,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const acceptSession = useCallback(
-    async (session: Session | null, revision: number, announce = false) => {
+    async (
+      session: Session | null,
+      revision: number,
+      announce = false,
+      checkPersistedExpiry = false,
+    ) => {
       if (revision !== authRevision.current) return;
+      let persistedExpiry = false;
+      try {
+        persistedExpiry = Boolean(
+          session &&
+          checkPersistedExpiry &&
+          isIdleExpiryPersisted(window.sessionStorage, idleExpiryStorageKey(session.user.id)),
+        );
+      } catch {
+        persistedExpiry = Boolean(session && checkPersistedExpiry);
+      }
+      if (session && checkPersistedExpiry && !persistedExpiry) {
+        const identity = session.user.id;
+        if (currentIdentity.current === identity || currentIdentity.current === null) {
+          const restored = restoreIdleActivity(
+            window.sessionStorage,
+            idleActivityStorageKey(identity),
+            Date.now(),
+          );
+          persistedExpiry =
+            restored.invalid || Date.now() - restored.lastActivityAt >= IDLE_EXPIRE_AFTER_MS;
+        }
+      }
+      if (session && persistedExpiry) {
+        idleLocked.current = true;
+        loginAttempt.current += 1;
+        authRevision.current += 1;
+        setAuthReady(true);
+        currentIdentity.current = null;
+        currentAuthorizationKey.current = "anonymous";
+        initializedAuth.current = true;
+        setUser(null);
+        setUsers([]);
+        setCacheGeneration((generation) => generation + 1);
+        queryClient.clear();
+        setIdleExpiryMessage(
+          "El acceso privado quedó bloqueado por inactividad. Inicia sesión nuevamente.",
+        );
+        void router.navigate({ to: "/login", replace: true }).catch(() => undefined);
+        void supabase.auth
+          .signOut({ scope: "local" })
+          .then(({ error }) => {
+            if (error) {
+              setIdleExpiryMessage(
+                "El acceso privado quedó bloqueado por inactividad, pero no se pudo confirmar el cierre local. Inicia sesión nuevamente cuando haya conexión.",
+              );
+            } else {
+              setIdleExpiryMessage("Tu sesión se cerró por inactividad. Inicia sesión nuevamente");
+            }
+          })
+          .catch(() => {
+            setIdleExpiryMessage(
+              "El acceso privado quedó bloqueado por inactividad, pero no se pudo confirmar el cierre local. Inicia sesión nuevamente cuando haya conexión.",
+            );
+          });
+        return;
+      }
+      // A late INITIAL_SESSION, refresh, or profile response cannot reopen a tab
+      // that has already crossed its local idle-expiry boundary. Only an
+      // explicit login verified below may clear idleLocked.
+      if (idleLocked.current && session) return;
       setAuthReady(false);
       if (!session) {
+        setIdleWarningOpen(false);
         const changed = !initializedAuth.current || currentIdentity.current !== null;
         if (changed) clearLegacyLocalSessionAndDataCache();
         currentIdentity.current = null;
@@ -217,7 +364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let profile: User | null;
       try {
         profile = await loadCurrentProfile();
-      } catch {
+      } catch (error) {
         // During invitation/recovery setup the profile is intentionally
         // inactive, so RLS may reject its private profile read. The Auth
         // callback identity is still sufficient to finish password setup;
@@ -226,7 +373,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (revision === authRevision.current) setAuthReady(true);
           return;
         }
-        if (revision === authRevision.current) setAuthReady(true);
+        if (revision !== authRevision.current) return;
+        if (error instanceof ProfileLoadError && (error.status === 401 || error.status === 403)) {
+          // A revoked/invalid identity must not retain private React or query state.
+          // Invalidate any login that is still waiting on an older profile response.
+          loginAttempt.current += 1;
+          const changed = currentIdentity.current !== null;
+          clearLegacyLocalSessionAndDataCache();
+          currentIdentity.current = null;
+          currentAuthorizationKey.current = "anonymous";
+          initializedAuth.current = true;
+          setCacheGeneration((generation) => generation + 1);
+          setUser(null);
+          setUsers([]);
+          queryClient.clear();
+          setAuthReady(true);
+          void supabase.auth.signOut({ scope: "local" });
+          if (changed) announceInvalidation();
+          return;
+        }
+        setAuthReady(true);
         return;
       }
       if (revision !== authRevision.current) return;
@@ -269,7 +435,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthReady(true);
       if (announce && changed) announceInvalidation();
     },
-    [announceInvalidation, loadCurrentProfile],
+    [announceInvalidation, loadCurrentProfile, queryClient, router],
   );
 
   const revalidateSession = useCallback(
@@ -290,7 +456,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut({ scope: "local" });
         return;
       }
-      await acceptSession(data.session, revision);
+      await acceptSession(data.session, revision, false, true);
     },
     [acceptSession],
   );
@@ -330,7 +496,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // next updateUser call on password-recovery callbacks.
       window.setTimeout(() => {
         void (async () => {
-          await acceptSession(session, revision, true);
+          await acceptSession(session, revision, true, event === "INITIAL_SESSION");
           if (
             revision === authRevision.current &&
             isVerifiedCallbackSession &&
@@ -370,7 +536,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // A valid hash callback can report no session on the first getSession
       // tick while auth-js is still exchanging it. Let the auth-state event
       // decide readiness; only explicit getSession errors mark the link bad.
-      void acceptSession(data.session, initialRevision);
+      void acceptSession(data.session, initialRevision, false, true);
       if (
         passwordSetupFlowActive.current &&
         !initialAuthCallback.hasError &&
@@ -474,6 +640,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCacheGeneration((generation) => generation + 1);
       }
       authRevision.current += 1;
+      idleLocked.current = false;
+      setIdleWarningOpen(false);
+      setIdleExpiryMessage(null);
+      try {
+        const activityKey = idleActivityStorageKey(profile.authUserId ?? "");
+        persistIdleActivity(window.sessionStorage, activityKey, Date.now());
+        clearIdleExpiry(window.sessionStorage, idleExpiryStorageKey(profile.authUserId ?? ""));
+      } catch {
+        // The fresh in-memory timer still applies for this page lifetime.
+      }
       currentAuthorizationKey.current = nextAuthorizationKey;
       currentIdentity.current = profile.authUserId ?? null;
       initializedAuth.current = true;
@@ -485,8 +661,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    const identity = currentIdentity.current;
     loginAttempt.current += 1;
     authRevision.current += 1;
+    idleLocked.current = false;
+    if (identity) {
+      try {
+        clearIdleActivity(window.sessionStorage, idleActivityStorageKey(identity));
+        clearIdleExpiry(window.sessionStorage, idleExpiryStorageKey(identity));
+      } catch {
+        // Storage cleanup is best-effort; local Auth sign-out remains authoritative.
+      }
+    }
+    setIdleWarningOpen(false);
+    setIdleExpiryMessage(null);
     clearLegacyLocalSessionAndDataCache();
     currentIdentity.current = null;
     currentAuthorizationKey.current = "anonymous";
@@ -498,6 +686,128 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     announceInvalidation();
     await supabase.auth.signOut({ scope: "local" });
   }, [announceInvalidation]);
+
+  useEffect(() => {
+    const identity = user?.authUserId;
+    if (!identity || !authReady || idleLocked.current || passwordSetupStatus !== "none") return;
+
+    let storage: Storage | null = null;
+    let key: string;
+    try {
+      storage = window.sessionStorage;
+      key = idleActivityStorageKey(identity);
+    } catch {
+      key = idleActivityStorageKey(identity);
+    }
+
+    const wallNow = () => Date.now();
+    const monotonicNow = () => performance.now();
+    const isIdentitySwitch =
+      observedIdleIdentity.current !== null && observedIdleIdentity.current !== identity;
+    observedIdleIdentity.current = identity;
+    const now = wallNow();
+    const restored =
+      isIdentitySwitch || !storage
+        ? { lastActivityAt: now, invalid: false }
+        : restoreIdleActivity(storage, key, now);
+    if (isIdentitySwitch || restored.invalid) {
+      if (storage) persistIdleActivity(storage, key, restored.lastActivityAt);
+    }
+    const clock = new IdleSessionClock({
+      lastActivityAt: restored.lastActivityAt,
+      wallNow,
+      monotonicNow,
+    });
+    let timer: number | undefined;
+    let disposed = false;
+    let lastHandledActivity = Number.NEGATIVE_INFINITY;
+
+    const clearTimer = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
+    };
+    const update = () => {
+      if (disposed || idleLocked.current) return;
+      clearTimer();
+      const state = clock.state();
+      if (state.phase === "expired") {
+        blockIdleIdentity(identity);
+        return;
+      }
+      setIdleWarningOpen(state.phase === "warning");
+      if (state.phase === "warning") {
+        setIdleRemaining(formatIdleRemaining(state.remainingMs));
+        timer = window.setTimeout(update, IDLE_WARNING_TICK_MS);
+      } else {
+        const untilWarning = Math.max(1, IDLE_WARNING_AFTER_MS - state.elapsedMs);
+        timer = window.setTimeout(update, Math.min(untilWarning, IDLE_EXPIRE_AFTER_MS));
+      }
+    };
+    const recordActivity = () => {
+      if (disposed || idleLocked.current) return;
+      if (clock.state().phase === "expired") {
+        blockIdleIdentity(identity);
+        return;
+      }
+      const timestamp = clock.markActivity();
+      if (storage) persistIdleActivity(storage, key, timestamp);
+      setIdleWarningOpen(false);
+      update();
+    };
+    const onActivity = (event: Event) => {
+      if (
+        (event.type === "pointerdown" || event.type === "click") &&
+        event.target instanceof Element &&
+        event.target.closest("[data-idle-continue]")
+      ) {
+        return;
+      }
+      if (!isTrustedIdleActivity(event)) return;
+      const now = monotonicNow();
+      if (now - lastHandledActivity < 750) return;
+      lastHandledActivity = now;
+      recordActivity();
+    };
+    const onResume = () => {
+      if (document.visibilityState === "visible") update();
+    };
+    const onPageShow = () => update();
+    idleContinueHandler.current = recordActivity;
+
+    for (const eventName of [
+      "pointerdown",
+      "keydown",
+      "touchstart",
+      "touchmove",
+      "wheel",
+      "click",
+    ]) {
+      document.addEventListener(eventName, onActivity, { capture: true, passive: true });
+    }
+    document.addEventListener("visibilitychange", onResume);
+    window.addEventListener("focus", onResume);
+    window.addEventListener("pageshow", onPageShow);
+    update();
+
+    return () => {
+      disposed = true;
+      if (idleContinueHandler.current === recordActivity) idleContinueHandler.current = null;
+      clearTimer();
+      for (const eventName of [
+        "pointerdown",
+        "keydown",
+        "touchstart",
+        "touchmove",
+        "wheel",
+        "click",
+      ]) {
+        document.removeEventListener(eventName, onActivity, true);
+      }
+      document.removeEventListener("visibilitychange", onResume);
+      window.removeEventListener("focus", onResume);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [authReady, blockIdleIdentity, passwordSetupStatus, user?.authUserId]);
 
   const updateEmployee = useCallback(
     async (
@@ -698,6 +1008,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         can,
         isAdmin,
+        idleExpiryMessage,
         updateEmployee,
         createEmployee,
         removeEmployee,
@@ -705,6 +1016,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         createEmployeeRecoveryLink,
       }}
     >
+      <Dialog
+        open={idleWarningOpen}
+        onOpenChange={(open) => {
+          if (!open && user?.authUserId) {
+            // Any explicit dialog close is a real user action and must reset
+            // both the in-memory monotonic clock and the persisted timestamp.
+            idleContinueHandler.current?.();
+          }
+        }}
+      >
+        <DialogContent
+          aria-describedby="idle-session-warning-description"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+          className="max-w-md"
+        >
+          <DialogHeader>
+            <DialogTitle>Tu sesión está por expirar</DialogTitle>
+            <DialogDescription id="idle-session-warning-description">
+              Por seguridad, tu sesión se cerrará automáticamente en 5 minutos debido a la
+              inactividad.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Tiempo restante:{" "}
+            <span aria-live="polite" aria-atomic="true" className="font-semibold text-foreground">
+              {idleRemaining}
+            </span>
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Los cambios que no hayas enviado pueden perderse al vencer la sesión. Si una operación
+            financiera ya fue enviada, su resultado se verificará antes de cualquier reintento.
+          </p>
+          <DialogFooter>
+            <Button
+              type="button"
+              data-idle-continue="true"
+              onClick={() => idleContinueHandler.current?.()}
+            >
+              Continuar sesión
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Fragment key={scopeKey}>{children}</Fragment>
     </Ctx.Provider>
   );
