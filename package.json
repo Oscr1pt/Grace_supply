@@ -5,7 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "prebuild": "node scripts/prebuild-production.mjs",
     "build": "vite build",
+    "postbuild": "node scripts/postbuild-production.mjs",
+    "build:production": "node scripts/build-production.mjs",
+    "deploy:production": "node scripts/deploy-production.mjs",
+    "test:browser:production-config": "node scripts/test-production-build-auth.mjs",
+    "test:browser:compiled-local-auth": "node scripts/test-compiled-local-auth.mjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSupabaseView, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { Sale, SaleLine } from "@/lib/types";
+import { isReceiptPolicyApplicable, receiptPolicyCopy } from "@/lib/receiptPolicy.js";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1438,6 +1439,8 @@ function ReceiptDialog({
   const [settings] = useSettings();
   const { data: clients } = useSupabaseView("sales_client_lookup");
   if (!sale) return null;
+  const policyEffectiveAt = import.meta.env.VITE_RECEIPT_POLICY_EFFECTIVE_AT ?? "";
+  const showReceiptPolicy = isReceiptPolicyApplicable(sale.createdAt, policyEffectiveAt);
   const client = clients.find((c) => c.id === sale.clientId);
   const historyClientName =
     "clientName" in sale && typeof sale.clientName === "string" ? sale.clientName : null;
@@ -1445,7 +1448,7 @@ function ReceiptDialog({
     sale.clientNameSnapshot || historyClientName || client?.name || "Cliente";
   return (
     <Dialog open={!!sale} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg receipt-dialog">
         <DialogHeader className="no-print">
           <DialogTitle>Recibo {sale.receiptNo}</DialogTitle>
         </DialogHeader>
@@ -1523,7 +1526,7 @@ function ReceiptDialog({
                 ))}
               </tbody>
             </table>
-            <div className="ml-auto w-56 mt-3 text-xs space-y-1">
+            <div className="ml-auto w-full max-w-56 mt-3 text-xs space-y-1">
               <div className="flex justify-between">
                 <span>Subtotal</span>
                 <span className="font-mono">{fmtMoney(sale.subtotal, settings.currency)}</span>
@@ -1541,9 +1544,33 @@ function ReceiptDialog({
                 <span className="font-mono">{fmtMoney(sale.total, settings.currency)}</span>
               </div>
             </div>
-            <div className="text-center text-xs text-gray-500 mt-6 border-t border-gray-300 pt-3">
-              Gracias por su compra en {settings.businessName}.
-            </div>
+            {showReceiptPolicy ? (
+              <section
+                data-testid="receipt-policy"
+                className="receipt-policy mt-3 border-t border-gray-300 pt-3 text-xs leading-5"
+              >
+                <p data-testid="receipt-policy-thanks" className="text-center font-semibold">
+                  {receiptPolicyCopy.thanks}
+                </p>
+                <p
+                  data-testid="receipt-policy-title"
+                  className="mt-1 text-center text-[11px] font-semibold tracking-wide"
+                >
+                  {receiptPolicyCopy.title}
+                </p>
+                <div className="mt-2 space-y-1.5 text-gray-700">
+                  {receiptPolicyCopy.paragraphs.map((paragraph) => (
+                    <p data-testid="receipt-policy-paragraph" key={paragraph}>
+                      {paragraph}
+                    </p>
+                  ))}
+                </div>
+              </section>
+            ) : (
+              <div className="text-center text-xs text-gray-500 mt-6 border-t border-gray-300 pt-3">
+                Gracias por su compra en {settings.businessName}.
+              </div>
+            )}
           </div>
         )}
         <DialogFooter className="no-print">

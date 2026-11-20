@@ -130,9 +130,81 @@
   .no-print { display: none !important; }
   .print-only { display: block !important; }
   body { background: white !important; }
+
+  body:has(.receipt-dialog) > *:not(:has(.receipt-dialog)) {
+    display: none !important;
+  }
+
+  body:has(.receipt-dialog) [data-radix-dialog-overlay],
+  body:has(.receipt-dialog) [data-radix-portal] > :not(.receipt-dialog) {
+    display: none !important;
+  }
+
+  body:has(.receipt-dialog) .receipt-dialog,
+  body:has(.receipt-dialog) #receipt-print,
+  body:has(.receipt-dialog) #receipt-print * {
+    visibility: visible !important;
+  }
+
+  body:has(.receipt-dialog) .receipt-dialog > button {
+    display: none !important;
+  }
+
+  body:has(.receipt-dialog) .receipt-dialog {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    transform: none !important;
+    translate: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+
+  body:has(.receipt-dialog) #receipt-print {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+  }
+
+  #receipt-print table {
+    table-layout: fixed;
+  }
+
+  #receipt-print th,
+  #receipt-print td {
+    overflow-wrap: anywhere;
+  }
+
+  #receipt-print tr,
+  #receipt-print .receipt-policy,
+  #receipt-print .receipt-policy p {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }
 
 .print-only { display: none; }
+
+@layer utilities {
+  @media print {
+    body:has(.receipt-dialog) .receipt-dialog {
+      translate: none !important;
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}
 
 @media (max-width: 1023px) {
   div.rounded-xl:has(> table),
