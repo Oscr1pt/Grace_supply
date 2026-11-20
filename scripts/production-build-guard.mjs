@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { RECEIPT_POLICY_RELEASE, resolveReceiptPolicyRelease } from "./receipt-policy-release.mjs";
 
 export const GRACE_PROJECT_REF = "qazjfofpfcwopcefupjl";
 export const GRACE_SUPABASE_URL = `https://${GRACE_PROJECT_REF}.supabase.co`;
@@ -190,12 +191,29 @@ export function validateProductionConfig(env, trustedKey) {
   if (env.VITE_ACCOUNT_RECOVERY_ENABLED !== "false") {
     fail("VITE_ACCOUNT_RECOVERY_ENABLED must be false.");
   }
+  const receiptPolicyRelease = resolveReceiptPolicyRelease({
+    activate: env.GRACE_ACTIVATE_RECEIPT_POLICY === "true",
+  });
   const cutoff = env.VITE_RECEIPT_POLICY_EFFECTIVE_AT;
   if (!isValidUtcReceiptCutoff(cutoff)) {
     fail("VITE_RECEIPT_POLICY_EFFECTIVE_AT must be an exact valid UTC timestamp ending in Z.");
   }
-  if (env.GRACE_APPROVED_RECEIPT_POLICY_EFFECTIVE_AT !== cutoff) {
-    fail("The receipt-policy cutoff does not match the explicitly approved release cutoff.");
+  if (cutoff !== receiptPolicyRelease.effectiveAt) {
+    fail("The receipt-policy cutoff differs from the versioned approved historical value.");
+  }
+  if (
+    env.GRACE_APPROVED_RECEIPT_POLICY_EFFECTIVE_AT &&
+    env.GRACE_APPROVED_RECEIPT_POLICY_EFFECTIVE_AT !== RECEIPT_POLICY_RELEASE.effectiveAt
+  ) {
+    fail(
+      "An operator-provided receipt-policy cutoff cannot override the versioned approved value.",
+    );
+  }
+  if (
+    env.GRACE_RECEIPT_POLICY_RELEASE_MODE &&
+    env.GRACE_RECEIPT_POLICY_RELEASE_MODE !== receiptPolicyRelease.mode
+  ) {
+    fail("Receipt-policy release mode differs from the versioned activation state.");
   }
 
   return {
@@ -325,9 +343,20 @@ export function verifyProductionBundle(outputDirectory, expected) {
   }
   walk(publicDirectory);
   const jsFiles = files.filter(({ name }) => name.endsWith(".js"));
-  const clientChunks = jsFiles.filter(({ name }) => /^auth-[A-Za-z0-9_-]+\.js$/.test(name));
+  const requiredClientProperties = [
+    "VITE_SUPABASE_URL",
+    "VITE_SUPABASE_ANON_KEY",
+    "VITE_ACCOUNT_PROVISIONING_ENABLED",
+    "VITE_ACCOUNT_RECOVERY_ENABLED",
+    "VITE_RECEIPT_POLICY_EFFECTIVE_AT",
+  ];
+  const clientChunks = jsFiles.filter(({ contents }) =>
+    requiredClientProperties.every((property) => propertyValues(contents, property).length > 0),
+  );
   if (clientChunks.length !== 1) {
-    throw new Error("Production bundle rejected: expected exactly one compiled auth client chunk.");
+    throw new Error(
+      "Production bundle rejected: expected exactly one effective Supabase client chunk.",
+    );
   }
   for (const file of files) inspectNoPrivilegedCredentials(file.contents);
   inspectProductionBundleText(clientChunks[0].contents, expected);

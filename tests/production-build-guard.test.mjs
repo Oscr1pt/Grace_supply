@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 let guard = {};
 try {
@@ -14,12 +17,13 @@ test("production guard exposes config and artifact validation entry points", () 
   assert.equal(typeof guard.selectApprovedPublicKey, "function");
   assert.equal(typeof guard.validateCompiledBrowserRuntimeConfig, "function");
   assert.equal(typeof guard.inspectNoPrivilegedCredentials, "function");
+  assert.equal(typeof guard.verifyProductionBundle, "function");
 });
 
 const projectUrl = "https://qazjfofpfcwopcefupjl.supabase.co";
 const approvedKey = "sb_publishable_abcdefghijklmnopqrstuv_ABCDEFGH";
 const syntheticPrivilegedKey = ["sb", "secret", "abcdefghijklmnopqrstuv", "ABCDEFGH"].join("_");
-const cutoff = "2026-11-18T03:30:00.000Z";
+const cutoff = "2026-11-18T03:18:00.000Z";
 
 function validEnv(overrides = {}) {
   return {
@@ -28,7 +32,6 @@ function validEnv(overrides = {}) {
     VITE_ACCOUNT_PROVISIONING_ENABLED: "true",
     VITE_ACCOUNT_RECOVERY_ENABLED: "false",
     VITE_RECEIPT_POLICY_EFFECTIVE_AT: cutoff,
-    GRACE_APPROVED_RECEIPT_POLICY_EFFECTIVE_AT: cutoff,
     ...overrides,
   };
 }
@@ -41,6 +44,10 @@ function assertConfigRejected(env, trustedKey = { type: "publishable", api_key: 
 }
 
 test("accepts only the approved project URL, full active publishable key, flags, and UTC cutoff", () => {
+  assert.ok(
+    Date.parse(cutoff) < Date.now(),
+    "the approved cutoff is historical and still valid for later releases",
+  );
   const result = guard.validateProductionConfig(validEnv(), {
     type: "publishable",
     api_key: approvedKey,
@@ -82,10 +89,10 @@ test("rejects a valid-shaped key from another project by full-value comparison",
 });
 
 test("rejects privileged modern and legacy service-role keys", () => {
-  assertConfigRejected(
-    validEnv({ VITE_SUPABASE_ANON_KEY: syntheticPrivilegedKey }),
-    { type: "secret", api_key: syntheticPrivilegedKey },
-  );
+  assertConfigRejected(validEnv({ VITE_SUPABASE_ANON_KEY: syntheticPrivilegedKey }), {
+    type: "secret",
+    api_key: syntheticPrivilegedKey,
+  });
   const serviceRoleJwt = `${Buffer.from('{"alg":"HS256"}').toString("base64url")}.${Buffer.from('{"role":"service_role"}').toString("base64url")}.synthetic`;
   assertConfigRejected(validEnv({ VITE_SUPABASE_ANON_KEY: serviceRoleJwt }), {
     type: "legacy",
@@ -110,7 +117,10 @@ test("rejects invalid, non-UTC, or unapproved receipt cutoffs", () => {
   assertConfigRejected(validEnv({ VITE_RECEIPT_POLICY_EFFECTIVE_AT: "2026-02-30T03:30:00.000Z" }));
   assertConfigRejected(validEnv({ VITE_RECEIPT_POLICY_EFFECTIVE_AT: "2026-11-18T03:30:00-04:00" }));
   assertConfigRejected(
-    validEnv({ GRACE_APPROVED_RECEIPT_POLICY_EFFECTIVE_AT: "2026-11-18T04:00:00.000Z" }),
+    validEnv({
+      VITE_RECEIPT_POLICY_EFFECTIVE_AT: "2026-11-19T03:18:00.000Z",
+      GRACE_APPROVED_RECEIPT_POLICY_EFFECTIVE_AT: "2026-11-19T03:18:00.000Z",
+    }),
   );
 });
 
@@ -146,6 +156,50 @@ test("inspects the emitted Vite env object consumed by the auth client", () => {
   });
   assert.equal(result.clientConfigVerified, true);
   assert.equal(result.projectRef, "qazjfofpfcwopcefupjl");
+});
+
+test("production bundle verification finds the effective auth client by its compiled config, not a filename", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "grace-production-auth-chunk-"));
+  const assets = path.join(root, "public", "assets");
+  mkdirSync(assets, { recursive: true });
+  writeFileSync(path.join(assets, "index--compiled.js"), viteEnvObject(), "utf8");
+  writeFileSync(path.join(assets, "app--other.js"), "const unrelated = true;", "utf8");
+  try {
+    const result = guard.verifyProductionBundle(root, {
+      url: projectUrl,
+      approvedKey,
+      accountProvisioningEnabled: true,
+      accountRecoveryEnabled: false,
+      receiptPolicyEffectiveAt: cutoff,
+    });
+    assert.equal(result.authChunk, "index--compiled.js");
+    assert.equal(result.clientConfigVerified, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("production bundle verification rejects ambiguous effective auth client chunks", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "grace-production-auth-chunk-"));
+  const assets = path.join(root, "public", "assets");
+  mkdirSync(assets, { recursive: true });
+  writeFileSync(path.join(assets, "client-a.js"), viteEnvObject(), "utf8");
+  writeFileSync(path.join(assets, "client-b.js"), viteEnvObject(), "utf8");
+  try {
+    assert.throws(
+      () =>
+        guard.verifyProductionBundle(root, {
+          url: projectUrl,
+          approvedKey,
+          accountProvisioningEnabled: true,
+          accountRecoveryEnabled: false,
+          receiptPolicyEffectiveAt: cutoff,
+        }),
+      /exactly one effective Supabase client chunk/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("ignores an unused Supabase SDK localhost default outside the effective Vite client config", () => {

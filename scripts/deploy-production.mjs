@@ -1,51 +1,25 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import {
-  getApprovedPublicKey,
-  isFutureUtcReceiptCutoff,
-  validateProductionConfig,
-} from "./production-build-guard.mjs";
+import { getApprovedPublicKey, validateProductionConfig } from "./production-build-guard.mjs";
+import { resolveReceiptPolicyRelease } from "./receipt-policy-release.mjs";
 
-function option(name) {
-  const index = process.argv.indexOf(name);
-  if (index >= 0) return process.argv[index + 1];
-  return process.argv.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
-}
-
-function run(label, executable, args, env, redactionValues) {
-  const result = spawnSync(executable, args, {
-    cwd: process.cwd(),
-    env,
-    encoding: "utf8",
-    windowsHide: true,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  const redact = (output = "") =>
-    redactionValues
-      .reduce((value, secret) => (secret ? value.replaceAll(secret, "[REDACTED]") : value), output)
-      .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[JWT REDACTED]");
-  if (result.stdout) process.stdout.write(redact(result.stdout));
-  if (result.stderr) process.stderr.write(redact(result.stderr));
-  if (result.error || result.status !== 0) {
-    console.error(`Release pipeline stopped at ${label}.`);
-    process.exit(result.status ?? 1);
-  }
-}
-
-const cutoff = option("--receipt-policy-effective-at");
-const approvedCutoff = option("--approved-receipt-policy-effective-at");
-const publish = process.argv.includes("--publish");
-if (!cutoff || cutoff !== approvedCutoff) {
+const allowedArgs = new Set(["--activate-receipt-policy", "--publish"]);
+const args = process.argv.slice(2);
+if (args.some((argument) => !allowedArgs.has(argument)) || new Set(args).size !== args.length) {
   console.error(
-    "Usage: npm run deploy:production -- --receipt-policy-effective-at=<UTC> --approved-receipt-policy-effective-at=<same-UTC> [--publish]",
+    "Usage: npm run deploy:production [-- --activate-receipt-policy] [--publish] (cutoff is versioned; arbitrary timestamp arguments are rejected)",
   );
   process.exit(2);
 }
 
+const activate = args.includes("--activate-receipt-policy");
+const publish = args.includes("--publish");
 let key;
 let env;
+let release;
 try {
+  release = resolveReceiptPolicyRelease({ activate });
   key = getApprovedPublicKey();
   env = {
     ...process.env,
@@ -53,12 +27,15 @@ try {
     VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY ?? key.api_key,
     VITE_ACCOUNT_PROVISIONING_ENABLED: process.env.VITE_ACCOUNT_PROVISIONING_ENABLED ?? "true",
     VITE_ACCOUNT_RECOVERY_ENABLED: process.env.VITE_ACCOUNT_RECOVERY_ENABLED ?? "false",
-    VITE_RECEIPT_POLICY_EFFECTIVE_AT: cutoff,
-    GRACE_APPROVED_RECEIPT_POLICY_EFFECTIVE_AT: approvedCutoff,
+    VITE_RECEIPT_POLICY_EFFECTIVE_AT:
+      process.env.VITE_RECEIPT_POLICY_EFFECTIVE_AT ?? release.effectiveAt,
+    GRACE_ACTIVATE_RECEIPT_POLICY: activate ? "true" : "false",
+    GRACE_RECEIPT_POLICY_RELEASE_MODE: release.mode,
   };
-  validateProductionConfig(env, key);
-  if (!isFutureUtcReceiptCutoff(cutoff))
-    throw new Error("Receipt cutoff must be future-dated for the release.");
+  const config = validateProductionConfig(env, key);
+  if (config.receiptPolicyEffectiveAt !== release.effectiveAt) {
+    throw new Error("Receipt-policy cutoff differs from the versioned release source.");
+  }
 } catch (error) {
   console.error(error.message);
   process.exit(1);
@@ -73,33 +50,40 @@ if (!npmCli) {
 const node = process.execPath;
 const redactions = [key.api_key];
 
-run(
-  "guarded production build",
-  node,
-  [
-    "scripts/build-production.mjs",
-    `--receipt-policy-effective-at=${cutoff}`,
-    `--approved-receipt-policy-effective-at=${approvedCutoff}`,
-  ],
-  env,
-  redactions,
-);
+function run(label, executable, childArgs, childEnv = env) {
+  const result = spawnSync(executable, childArgs, {
+    cwd: process.cwd(),
+    env: childEnv,
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  const redact = (output = "") =>
+    redactions
+      .reduce((value, secret) => (secret ? value.replaceAll(secret, "[REDACTED]") : value), output)
+      .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[JWT REDACTED]");
+  if (result.stdout) process.stdout.write(redact(result.stdout));
+  if (result.stderr) process.stderr.write(redact(result.stderr));
+  if (result.error || result.status !== 0) {
+    console.error(`Release pipeline stopped at ${label}.`);
+    process.exit(result.status ?? 1);
+  }
+}
 
-run(
-  "configuration and receipt unit tests",
+const buildArgs = [
   node,
-  ["--test", "tests/production-build-guard.test.mjs", "tests/receipt-policy.test.mjs"],
-  env,
-  redactions,
-);
+  ["scripts/build-production.mjs", ...(activate ? ["--activate-receipt-policy"] : [])],
+];
+run("guarded production build", buildArgs[0], buildArgs[1]);
 
-run(
-  "compiled auth configuration probe",
-  node,
-  ["scripts/test-production-build-auth.mjs"],
-  env,
-  redactions,
-);
+run("configuration and receipt policy unit tests", node, [
+  "--test",
+  "tests/production-build-guard.test.mjs",
+  "tests/receipt-policy.test.mjs",
+  "tests/receipt-policy-release.test.mjs",
+]);
+
+run("compiled auth configuration probe", node, ["scripts/test-production-build-auth.mjs"]);
 
 let generated;
 try {
@@ -123,27 +107,29 @@ if (
 }
 
 const wranglerCli = path.resolve("node_modules/wrangler/bin/wrangler.js");
-run(
-  "Wrangler dry-run",
-  node,
-  [wranglerCli, "deploy", "--dry-run", "--config", emittedConfigPath],
-  env,
-  redactions,
-);
+run("Wrangler dry-run", node, [wranglerCli, "deploy", "--dry-run", "--config", emittedConfigPath]);
 if (!publish) {
   console.log(
     "Preflight complete. No deployment was performed; add --publish only under an explicit release authorization.",
   );
   process.exit(0);
 }
-if (!isFutureUtcReceiptCutoff(cutoff)) {
-  console.error("Release pipeline stopped: the receipt-policy cutoff expired before publication.");
+
+try {
+  const beforePublication = resolveReceiptPolicyRelease({ activate });
+  if (
+    beforePublication.effectiveAt !== release.effectiveAt ||
+    beforePublication.mode !== release.mode
+  ) {
+    throw new Error("Receipt-policy release configuration changed during preflight.");
+  }
+} catch (error) {
+  console.error(`Release pipeline stopped before publication: ${error.message}`);
   process.exit(1);
 }
-run(
-  "authorized Cloudflare publication",
-  node,
-  [wranglerCli, "deploy", "--config", emittedConfigPath],
-  env,
-  redactions,
-);
+run("authorized Cloudflare publication", node, [
+  wranglerCli,
+  "deploy",
+  "--config",
+  emittedConfigPath,
+]);

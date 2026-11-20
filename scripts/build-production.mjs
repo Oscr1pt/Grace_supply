@@ -1,29 +1,12 @@
 import { spawnSync } from "node:child_process";
-import {
-  getApprovedPublicKey,
-  isFutureUtcReceiptCutoff,
-  validateProductionConfig,
-} from "./production-build-guard.mjs";
+import { getApprovedPublicKey, validateProductionConfig } from "./production-build-guard.mjs";
+import { resolveReceiptPolicyRelease } from "./receipt-policy-release.mjs";
 
-function argumentValue(name) {
-  const index = process.argv.indexOf(name);
-  if (index >= 0) return process.argv[index + 1];
-  const pair = process.argv.find((argument) => argument.startsWith(`${name}=`));
-  return pair?.slice(name.length + 1);
-}
-
-function reportOutput(output, key) {
-  const redacted = output
-    .replaceAll(key, "[APPROVED PUBLIC KEY REDACTED]")
-    .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[JWT REDACTED]");
-  if (redacted) process.stdout.write(redacted);
-}
-
-const cutoff = argumentValue("--receipt-policy-effective-at");
-const approvedCutoff = argumentValue("--approved-receipt-policy-effective-at");
-if (!cutoff || cutoff !== approvedCutoff) {
+const allowedArgs = new Set(["--activate-receipt-policy"]);
+const args = process.argv.slice(2);
+if (args.some((argument) => !allowedArgs.has(argument)) || args.length > 1) {
   console.error(
-    "Usage: npm run build:production -- --receipt-policy-effective-at=<UTC> --approved-receipt-policy-effective-at=<same-UTC>",
+    "Usage: npm run build:production [-- --activate-receipt-policy] (cutoff is versioned; arbitrary timestamp arguments are rejected)",
   );
   process.exit(2);
 }
@@ -31,26 +14,27 @@ if (!cutoff || cutoff !== approvedCutoff) {
 let key;
 let env;
 try {
+  const activate = args.includes("--activate-receipt-policy");
+  const release = resolveReceiptPolicyRelease({ activate });
   key = getApprovedPublicKey();
   const inherited = process.env;
-  const explicit = {
+  env = {
     ...inherited,
     VITE_SUPABASE_URL: inherited.VITE_SUPABASE_URL ?? "https://qazjfofpfcwopcefupjl.supabase.co",
     VITE_SUPABASE_ANON_KEY: inherited.VITE_SUPABASE_ANON_KEY ?? key.api_key,
     VITE_ACCOUNT_PROVISIONING_ENABLED: inherited.VITE_ACCOUNT_PROVISIONING_ENABLED ?? "true",
     VITE_ACCOUNT_RECOVERY_ENABLED: inherited.VITE_ACCOUNT_RECOVERY_ENABLED ?? "false",
-    VITE_RECEIPT_POLICY_EFFECTIVE_AT: cutoff,
-    GRACE_APPROVED_RECEIPT_POLICY_EFFECTIVE_AT: approvedCutoff,
+    VITE_RECEIPT_POLICY_EFFECTIVE_AT:
+      inherited.VITE_RECEIPT_POLICY_EFFECTIVE_AT ?? release.effectiveAt,
+    GRACE_ACTIVATE_RECEIPT_POLICY: activate ? "true" : "false",
+    GRACE_RECEIPT_POLICY_RELEASE_MODE: release.mode,
   };
-  const config = validateProductionConfig(explicit, key);
-  if (!isFutureUtcReceiptCutoff(cutoff)) {
-    throw new Error(
-      "Production build configuration rejected: receipt-policy cutoff must be in the future for a new release.",
-    );
+  const config = validateProductionConfig(env, key);
+  if (config.receiptPolicyEffectiveAt !== release.effectiveAt) {
+    throw new Error("Production build cutoff differs from the versioned receipt-policy release.");
   }
-  env = { ...explicit };
   console.log(
-    `Validated release configuration for ${config.projectRef}; effective cutoff ${cutoff}.`,
+    `Validated ${release.mode} receipt-policy release for ${config.projectRef}; cutoff remains ${release.effectiveAt}.`,
   );
 } catch (error) {
   console.error(error.message);
@@ -74,8 +58,10 @@ if (result.error) {
   process.exit(1);
 }
 if (result.status !== 0) {
-  reportOutput(result.stdout ?? "", key.api_key);
-  reportOutput(result.stderr ?? "", key.api_key);
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
+    .replaceAll(key.api_key, "[APPROVED PUBLIC KEY REDACTED]")
+    .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[JWT REDACTED]");
+  process.stdout.write(output);
   process.exit(result.status ?? 1);
 }
 const summary = `${result.stdout ?? ""}\n${result.stderr ?? ""}`
