@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-20
+goal: Keep subsequent builds publishing with the immutable historical cutoff
+  while retaining explicit future-date approval for first activation.
