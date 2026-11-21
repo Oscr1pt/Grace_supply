@@ -1,0 +1,23 @@
+﻿# Tasks
+
+- [x] 1. Auditar el copy visible relacionado con aprobación, revisión y disponibilidad futura; clasificar y conservar mensajes que representen estados operativos, legales o de seguridad reales.
+- [x] 2. Quitar los tres textos aprobados. En Login, conservar el enlace de recuperación únicamente cuando la flag lo habilita; en Ajustes, retirar el `id` de ayuda eliminado sin dejar referencias ARIA.
+- [x] 3. Añadir y ejecutar regresiones focalizadas para Login, Dashboard y Ajustes; comprobar que siguen presentes los controles ITBIS, acciones de login y mensajes operativos pertinentes.
+- [x] 4. Ejecutar TypeScript, ESLint focalizado, Prettier focalizado, build local/protegido, OpenSpec strict y `git diff --check`; documentar resultados de las comprobaciones de navegador.
+- [x] 5. Revisar visualmente Login, Dashboard y Ajustes en escritorio y móvil. Cuando el stack local no permitió completar AuthReady, utilizar un flujo de presentación con respuestas y datos sintéticos aislados, sin presentarlo como validación de autenticación.
+
+**Evidencia técnica:** regresión CHG-39 4/4 PASS; pruebas unitarias relacionadas 10/10 PASS; TypeScript, ESLint focalizado, Prettier focalizado, build de desarrollo y build protegido PASS; probe del artefacto compilado PASS; Wrangler dry-run PASS; OpenSpec strict y `git diff --check` PASS. El bundle y la clave Supabase aprobada fueron verificados por el pipeline protegido, sin exponer la clave. El corte histórico de recibos se mantuvo en `2026-11-18T03:18:00.000Z`.
+
+**Evidencia visual:** Playwright con Vite nuevo y backend enteramente interceptado con datos sintéticos pasó 1/1; Login, Dashboard y Ajustes se inspeccionaron en viewports de escritorio y móvil. Hay cuatro capturas en `test-results/chg39-synthetic-visual.tem-627cf-and-Settings-desktop-mobile/`. No hubo excepciones JavaScript ni desbordamiento horizontal. El texto provisional del Dashboard no aparece y la tarjeta Acciones rápidas conserva sus botones; en Ajustes permanecen Aplicar ITBIS, Guardar ajustes y Restablecer valores, sin referencias al `id` eliminado. El Dashboard muestra avisos de lectura porque la prueba visual no simuló el contenido de todas las APIs de negocio; esos avisos son limitación del fixture y no se consideran evidencia funcional.
+
+**Límite de autenticación local:** la revisión visual no constituye un login real. El endpoint de salud de Auth local respondió HTTP 200, pero `supabase status` no pudo resolver el stack desde el worktree CHG-37 y la consulta de `username-login` usada en diagnóstico fue un GET que expiró; no se demostró que esa solicitud fuera un flujo de login válido ni se determinó la causa del AuthReady anterior. En el Vite nuevo, AuthReady sí completó con la sesión simulada. No se modificó AuthProvider.
+
+**Producción en la revisión visual previa:** todavía no se había desplegado CHG-39 ni modificado Supabase Cloud; Cloudflare permanecía en la versión `d0441c24-37e2-4c30-9eee-7e46556a4551`. La publicación y aceptación posterior se registran a continuación.
+
+- [x] 6. Evitar que la grilla de Dashboard estire «Acciones rápidas» a la altura de «Ventas recientes» y verificar su distribución en escritorio, móvil y con menos acciones permitidas.
+
+**Evidencia de layout:** Playwright Chromium 1/1 PASS. La prueba exige `items-start` en el contenedor real y mide la grilla con tarjetas sintéticas usando la hoja de estilos de Vite: escritorio conserva dos columnas y la tarjeta de acciones queda en su altura de contenido junto a una tarjeta reciente artificialmente más alta; móvil conserva una columna y no presenta desbordamiento horizontal. Se comprobaron seis enlaces y una variante con cuatro. Capturas: `test-results/chg39-dashboard-layout-qui-08718-op-and-responsive-on-mobile/dashboard-quick-actions-desktop.png` y `dashboard-quick-actions-mobile.png`. El flujo de AuthReady local siguió sin completar, por lo que esta comprobación valida el layout CSS con fixture sintético y no representa una sesión autenticada ni una captura de la página real del Dashboard.
+
+**Aceptación manual final en producción (2026-11-21):** el propietario confirmó el inicio de sesión real, la tarjeta Acciones rápidas compacta, la presentación de Ventas recientes, la ausencia de los tres mensajes provisionales y la navegación/funcionamiento general. La corrección se publicó en Worker `grace-supply`, deployment `2aeac55e-2ce5-4333-9003-098de055c571`, versión `f20970a9-cfa2-4cfb-b5b2-46e7944d6a63`, al 100 % del tráfico. CHG-39 queda aprobada funcionalmente.
+
+**Integridad de producción:** la publicación fue exclusivamente frontend; no se aplicaron migraciones ni se modificó Supabase Cloud. No se realizaron despliegues después de la versión validada indicada arriba.
