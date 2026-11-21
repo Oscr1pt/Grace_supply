@@ -120,7 +120,7 @@ function Dashboard() {
         />
       </section>
 
-      <div className="mt-8 grid min-w-0 gap-6 lg:grid-cols-2">
+      <div className="mt-8 grid min-w-0 items-start gap-6 lg:grid-cols-2">
         <section
           aria-labelledby="recent-sales-title"
           className="min-w-0 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6"
@@ -217,9 +217,6 @@ function Dashboard() {
                 </p>
               )}
           </div>
-          <p className="mt-4 text-xs text-muted-foreground">
-            El formulario comprueba la política tributaria antes de permitir contabilizar una venta.
-          </p>
         </section>
       </div>
     </div>

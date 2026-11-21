@@ -226,18 +226,13 @@ function LoginPage() {
             </Button>
           </form>
 
-          {accountRecoveryEnabled ? (
+          {accountRecoveryEnabled && (
             <Link
               to="/recover"
               className="block text-center text-sm text-[#D4AF37] underline-offset-4 hover:underline"
             >
               ¿Olvidaste tu contraseña?
             </Link>
-          ) : (
-            <p role="note" className="text-center text-xs text-neutral-500">
-              La recuperación se habilitará tras verificar el correo transaccional y las URL de este
-              entorno.
-            </p>
           )}
 
           <p className="text-center text-xs text-neutral-600 pt-4">

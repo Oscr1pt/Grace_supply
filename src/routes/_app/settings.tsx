@@ -229,10 +229,7 @@ function SettingsPage() {
           />
           Aplicar ITBIS
         </label>
-        <p id="settings-taxRate-help" className="text-sm text-muted-foreground">
-          La tasa admitida para V1 es 18 %. Activa Aplicar ITBIS solo cuando la configuración
-          operativa haya sido revisada por un administrador autorizado.
-        </p>
+
         <div className="flex flex-wrap items-center gap-2 pt-2">
           <Button
             type="submit"
