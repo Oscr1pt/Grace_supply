@@ -57,7 +57,7 @@ export function normalizeContact(value) {
     .toLocaleLowerCase("es-DO");
 }
 
-export function validateClientForm(form, { requireDocument = false } = {}) {
+export function validateClientForm(form) {
   const errors = {};
   const name = String(form?.name ?? "")
     .trim()
@@ -73,9 +73,7 @@ export function validateClientForm(form, { requireDocument = false } = {}) {
   if (phone && !/^\+?[0-9().\s-]{7,24}$/.test(phone)) {
     errors.phone = "Escribe un teléfono válido o deja este campo vacío.";
   }
-  if (!document && requireDocument) {
-    errors.rnc = "Escribe una cédula o RNC válido para registrar un cliente nuevo.";
-  } else if (document && !isValidClientDocument(document)) {
+  if (document && !isValidClientDocument(document)) {
     errors.rnc =
       "Escribe una cédula de 11 dígitos o un RNC de 9 dígitos válido; no verifica identidad oficial.";
   }

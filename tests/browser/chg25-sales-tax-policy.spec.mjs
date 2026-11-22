@@ -236,7 +236,9 @@ test.describe.serial("CHG-25 configurable ITBIS and internal receipts", () => {
       .getByRole("button", { name: /Ver recibo/ })
       .first()
       .click();
-    await expect(page.getByText(/RECIBO INTERNO/).first()).toBeVisible();
+    const receipt = page.locator("#receipt-print");
+    await expect(receipt).toContainText(/GS-[A-F0-9]{12}/);
+    await expect(receipt).not.toContainText(/RECIBO INTERNO|NO ES COMPROBANTE FISCAL/);
   });
 
   test.afterAll(async () => {

@@ -38,7 +38,7 @@ test.describe.serial("CHG-36 receipt policy footer", () => {
     if (!["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) {
       throw new Error("CHG-36 refuses non-loopback Supabase URLs.");
     }
-    if (!/^supabase_db_chg36[a-z0-9]+$/.test(container)) {
+    if (!/^supabase_db_(?:chg36[a-z0-9]+|gracechg39[a-z0-9]+)$/.test(container)) {
       throw new Error("CHG-36 refuses a database not dedicated to this disposable test.");
     }
     if (
@@ -197,7 +197,17 @@ test.describe.serial("CHG-36 receipt policy footer", () => {
   }
 
   async function openReceipt(page, receiptNo) {
+    const historyResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname.endsWith("/rpc/search_sales_history") &&
+        (response.request().postData() ?? "").includes(receiptNo),
+      { timeout: 20_000 },
+    );
     await page.getByLabel("Buscar").fill(receiptNo);
+    const response = await historyResponse;
+    const payload = await response.json();
+    expect(response.ok(), `Sales history returned HTTP ${response.status()}.`).toBe(true);
+    expect(JSON.stringify(payload)).toContain(receiptNo);
     await expect(page.getByRole("button", { name: `Ver recibo ${receiptNo}` })).toBeVisible();
     await page.getByRole("button", { name: `Ver recibo ${receiptNo}` }).click();
     return page.getByRole("dialog");
@@ -211,7 +221,8 @@ test.describe.serial("CHG-36 receipt policy footer", () => {
 
     const currentReceipt = await openReceipt(page, receiptNos[1]);
     const printReceipt = currentReceipt.locator("#receipt-print");
-    await expect(currentReceipt).toContainText("RECIBO INTERNO — NO ES COMPROBANTE FISCAL");
+    await expect(printReceipt).not.toContainText("RECIBO INTERNO — NO ES COMPROBANTE FISCAL");
+    await expect(printReceipt).toContainText(receiptNos[1]);
     await expect(printReceipt.getByTestId("receipt-policy")).toBeVisible();
     await expect(printReceipt.getByTestId("receipt-policy-thanks")).toHaveText(
       "¡GRACIAS POR SU COMPRA!",
@@ -242,6 +253,7 @@ test.describe.serial("CHG-36 receipt policy footer", () => {
     expect(contentOrder).toBe(true);
 
     await page.emulateMedia({ media: "print" });
+    await expect(printReceipt).not.toContainText("RECIBO INTERNO — NO ES COMPROBANTE FISCAL");
     for (const width of [794, 320]) {
       await page.setViewportSize({ width, height: 1123 });
       const dimensions = await printReceipt.evaluate((element) => ({
@@ -303,6 +315,9 @@ test.describe.serial("CHG-36 receipt policy footer", () => {
     await expect(historicReceipt.locator("#receipt-print")).not.toContainText(
       "POLÍTICA DE CAMBIOS Y DEVOLUCIONES",
     );
+    await expect(historicReceipt.locator("#receipt-print")).not.toContainText(
+      "RECIBO INTERNO — NO ES COMPROBANTE FISCAL",
+    );
     await expect(historicReceipt.locator("#receipt-print")).toContainText("RD$20.00");
     await expect(historicReceipt.locator("#receipt-print")).toContainText(
       "Gracias por su compra en",
@@ -310,6 +325,9 @@ test.describe.serial("CHG-36 receipt policy footer", () => {
     await historicReceipt.getByRole("button", { name: "Cerrar", exact: true }).click();
 
     const creditReceipt = await openReceipt(page, receiptNos[2]);
+    await expect(creditReceipt.locator("#receipt-print")).not.toContainText(
+      "RECIBO INTERNO — NO ES COMPROBANTE FISCAL",
+    );
     await expect(creditReceipt.locator("#receipt-print")).toContainText("Cr\u00E9dito");
     await expect(
       creditReceipt.locator("#receipt-print").getByTestId("receipt-policy"),
@@ -319,6 +337,9 @@ test.describe.serial("CHG-36 receipt policy footer", () => {
     const voidedReceipt = await openReceipt(page, receiptNos[3]);
     await expect(voidedReceipt).toContainText("VENTA ANULADA");
     await expect(voidedReceipt).toContainText("Prueba local CHG-36");
+    await expect(voidedReceipt.locator("#receipt-print")).not.toContainText(
+      "RECIBO INTERNO — NO ES COMPROBANTE FISCAL",
+    );
     await expect(
       voidedReceipt.locator("#receipt-print").getByTestId("receipt-policy"),
     ).toBeVisible();
@@ -326,6 +347,9 @@ test.describe.serial("CHG-36 receipt policy footer", () => {
       1,
     );
     await page.emulateMedia({ media: "print" });
+    await expect(voidedReceipt.locator("#receipt-print")).not.toContainText(
+      "RECIBO INTERNO — NO ES COMPROBANTE FISCAL",
+    );
     await expect(
       voidedReceipt.locator("#receipt-print").getByTestId("receipt-policy"),
     ).toBeVisible();

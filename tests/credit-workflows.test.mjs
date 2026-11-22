@@ -41,18 +41,22 @@ test("client identity validation normalizes Dominican documents without claiming
   assert.equal(isValidCedula("001-1234567-4"), false);
   assert.equal(isValidRnc("1-01-12345-1"), true);
   assert.equal(isValidRnc("1-01-12345-2"), false);
+  const enteredCedula = "40219994058";
+  const firstTenDigits = enteredCedula.slice(0, 10);
+  const weightedSum = [...firstTenDigits].reduce((sum, digit, index) => {
+    const product = Number(digit) * (index % 2 === 0 ? 1 : 2);
+    return sum + (product > 9 ? product - 9 : product);
+  }, 0);
+  assert.equal(weightedSum, 44);
+  assert.equal((10 - (weightedSum % 10)) % 10, 6);
+  assert.equal(isValidCedula(enteredCedula), false);
   assert.deepEqual(
     validateClientForm({ name: "Cliente", email: "", phone: "", rnc: "texto libre" }),
     {
       rnc: "Escribe una cédula de 11 dígitos o un RNC de 9 dígitos válido; no verifica identidad oficial.",
     },
   );
-  assert.deepEqual(
-    validateClientForm({ name: "Nuevo", email: "", phone: "", rnc: "" }, { requireDocument: true }),
-    {
-      rnc: "Escribe una cédula o RNC válido para registrar un cliente nuevo.",
-    },
-  );
+  assert.deepEqual(validateClientForm({ name: "Nuevo", email: "", phone: "", rnc: "" }), {});
 });
 
 test("client duplicate detection excludes the edited row and distinguishes homonyms", () => {

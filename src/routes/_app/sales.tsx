@@ -1468,7 +1468,7 @@ function ReceiptDialog({
           </Alert>
         ) : (
           <div id="receipt-print" className="bg-white text-black p-6 rounded-md font-sans">
-            <div className="text-center border-b border-gray-300 pb-3">
+            <div className="text-center border-b border-gray-300 pb-2">
               <div
                 className="font-display text-2xl"
                 style={{ fontFamily: "'Cormorant Garamond', serif" }}
@@ -1477,9 +1477,6 @@ function ReceiptDialog({
               </div>
               <div className="text-xs text-gray-600 mt-1">{settings.businessAddress}</div>
               <div className="text-xs text-gray-600">{settings.businessPhone}</div>
-              <div className="mt-2 text-[11px] font-semibold tracking-wide">
-                RECIBO INTERNO — NO ES COMPROBANTE FISCAL
-              </div>
             </div>
             {sale.voidedAt && (
               <div className="mt-3 rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-800">

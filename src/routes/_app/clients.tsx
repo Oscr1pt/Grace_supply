@@ -201,7 +201,7 @@ function ClientsPage() {
 
   const saveClient = async () => {
     if (pending || partySaveInFlight.current) return;
-    const errors = validateClientForm(form, { requireDocument: !editing });
+    const errors = validateClientForm(form);
     const documentDuplicate = findClientDocumentDuplicate(clients, form.rnc, editing?.id);
     if (documentDuplicate) {
       errors.rnc =
@@ -219,11 +219,12 @@ function ClientsPage() {
     partySaveInFlight.current = true;
     setPending(true);
     setSaveState("saving");
+    const normalizedDocument = normalizeClientDocument(form.rnc) || null;
     try {
       if (editing) {
         await update(editing.id, {
           ...form,
-          rnc: form.rnc ? normalizeClientDocument(form.rnc) : null,
+          rnc: normalizedDocument,
         });
         toast.success("Cliente actualizado");
       } else {
@@ -231,7 +232,7 @@ function ClientsPage() {
           id: uid(),
           createdAt: new Date().toISOString(),
           ...form,
-          rnc: form.rnc ? normalizeClientDocument(form.rnc) : null,
+          rnc: normalizedDocument,
         });
         toast.success("Cliente agregado");
       }
@@ -518,21 +519,21 @@ function ClientsPage() {
                 </Field>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="RNC / Cédula" error={formErrors.rnc} htmlFor="client-rnc">
+                  <Field
+                    label="RNC / Cédula (opcional)"
+                    error={formErrors.rnc}
+                    htmlFor="client-rnc"
+                  >
                     <Input
                       id="client-rnc"
                       aria-invalid={Boolean(formErrors.rnc)}
-                      aria-describedby={formErrors.rnc ? "client-rnc-error" : "client-rnc-hint"}
+                      aria-describedby={formErrors.rnc ? "client-rnc-error" : undefined}
                       value={form.rnc || ""}
                       onChange={(e) => {
                         setForm({ ...form, rnc: e.target.value });
                         setFormErrors({ ...formErrors, rnc: undefined });
                       }}
-                      placeholder={
-                        editing
-                          ? "Identificación (opcional para históricos)"
-                          : "Cédula o RNC requerido"
-                      }
+                      placeholder="Puedes agregarlo después"
                     />
                   </Field>
                   <Field label="Estado">
@@ -629,9 +630,7 @@ function ClientsPage() {
                         Coincidencias de nombre: {nameMatches.map((match) => match.name).join(", ")}
                         .
                       </span>
-                      <span className="block">
-                        Confirmo que es otra persona; el documento es diferente.
-                      </span>
+                      <span className="block">Confirmo que se trata de otra persona distinta.</span>
                     </span>
                   </label>
                 )}
