@@ -1,11 +1,12 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { RECEIPT_POLICY_RELEASE, resolveReceiptPolicyRelease } from "./receipt-policy-release.mjs";
 
 export const GRACE_PROJECT_REF = "qazjfofpfcwopcefupjl";
 export const GRACE_SUPABASE_URL = `https://${GRACE_PROJECT_REF}.supabase.co`;
 export const SUPABASE_CLI_VERSION = "2.121.0";
+const SUPABASE_CLI_TIMEOUT_MS = 30_000;
 
 function fail(message) {
   throw new Error(`Production build configuration rejected: ${message}`);
@@ -87,39 +88,115 @@ export function selectApprovedPublicKey(cliJson, { allowLegacy = false } = {}) {
   fail("No single approved active publishable key is available for this project.");
 }
 
-export function getApprovedPublicKey({ cwd = process.cwd(), allowLegacy = false } = {}) {
-  const npmCli = process.env.npm_execpath;
-  if (!npmCli)
-    fail("Run the production guard through npm so the pinned CLI can be invoked safely.");
-  let stdout;
+export function getApprovedPublicKey({
+  cwd = process.cwd(),
+  allowLegacy = false,
+  timeoutMs = SUPABASE_CLI_TIMEOUT_MS,
+} = {}) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    fail("Supabase CLI timeout must be a positive integer.");
+  }
+
+  const packageJsonPath = path.join(cwd, "package.json");
+  const packageLockPath = path.join(cwd, "package-lock.json");
+  const cliPackagePath = path.join(cwd, "node_modules", "supabase");
+  const cliEntryPath = path.join(cliPackagePath, "dist", "supabase.js");
+  let projectPackage;
+  let packageLock;
+  let cliPackage;
   try {
-    stdout = execFileSync(
-      process.execPath,
-      [
-        npmCli,
-        "exec",
-        "--offline",
-        "--yes",
-        `--package=supabase@${SUPABASE_CLI_VERSION}`,
-        "--",
-        "supabase",
-        "projects",
-        "api-keys",
-        "--project-ref",
-        GRACE_PROJECT_REF,
-        "--output",
-        "json",
-      ],
-      {
-        cwd,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      },
+    projectPackage = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    packageLock = JSON.parse(readFileSync(packageLockPath, "utf8"));
+    cliPackage = JSON.parse(readFileSync(path.join(cliPackagePath, "package.json"), "utf8"));
+  } catch {
+    fail(`The locally pinned Supabase CLI ${SUPABASE_CLI_VERSION} is not installed.`);
+  }
+
+  if (
+    projectPackage.devDependencies?.supabase !== SUPABASE_CLI_VERSION ||
+    packageLock.packages?.[""]?.devDependencies?.supabase !== SUPABASE_CLI_VERSION ||
+    cliPackage.name !== "supabase" ||
+    cliPackage.version !== SUPABASE_CLI_VERSION ||
+    !existsSync(cliEntryPath)
+  ) {
+    fail(`The local Supabase CLI installation is not pinned to ${SUPABASE_CLI_VERSION}.`);
+  }
+
+  const platform =
+    process.platform === "win32"
+      ? "windows"
+      : process.platform === "darwin"
+        ? "darwin"
+        : process.platform === "linux"
+          ? "linux"
+          : null;
+  if (!platform) fail("The pinned Supabase CLI does not support this build platform.");
+  const isMusl =
+    process.platform === "linux" && !process.report?.getReport?.().header?.glibcVersionRuntime;
+  const platformPackageName = `@supabase/cli-${platform}-${process.arch}${isMusl ? "-musl" : ""}`;
+  const packageEntries = packageLock.packages;
+  const cliLockEntry = packageEntries?.["node_modules/supabase"];
+  const platformLockEntry = packageEntries?.[`node_modules/${platformPackageName}`];
+  const hasTrustedPackageSource = (entry, name) =>
+    entry?.version === SUPABASE_CLI_VERSION &&
+    entry.resolved ===
+      `https://registry.npmjs.org/${name}/-/` +
+        `${name.startsWith("@supabase/") ? name.slice("@supabase/".length) + "-" : "supabase-"}${SUPABASE_CLI_VERSION}.tgz` &&
+    typeof entry.integrity === "string" &&
+    /^sha512-[A-Za-z0-9+/]+=*$/.test(entry.integrity);
+  const expectedPlatformVersion = cliPackage.optionalDependencies?.[platformPackageName];
+  const platformPackagePath = path.join(cwd, "node_modules", ...platformPackageName.split("/"));
+  let installedPlatform;
+  try {
+    installedPlatform = JSON.parse(
+      readFileSync(path.join(platformPackagePath, "package.json"), "utf8"),
     );
   } catch {
-    fail(`Supabase CLI ${SUPABASE_CLI_VERSION} could not verify the approved project key.`);
+    fail(
+      `The pinned Supabase CLI binary for ${process.platform}/${process.arch} is not installed.`,
+    );
   }
+  if (
+    expectedPlatformVersion !== SUPABASE_CLI_VERSION ||
+    installedPlatform.name !== platformPackageName ||
+    installedPlatform.version !== SUPABASE_CLI_VERSION ||
+    !hasTrustedPackageSource(cliLockEntry, "supabase") ||
+    !hasTrustedPackageSource(platformLockEntry, platformPackageName)
+  ) {
+    fail(`The local Supabase CLI ${SUPABASE_CLI_VERSION} provenance could not be verified.`);
+  }
+
+  const runCli = (args, operation) => {
+    const cliEnv = { ...process.env };
+    delete cliEnv.SUPABASE_CLI_BINARY_OVERRIDE;
+    const result = spawnSync(process.execPath, [cliEntryPath, ...args], {
+      cwd,
+      env: cliEnv,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      timeout: timeoutMs,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    if (result.error?.code === "ETIMEDOUT") {
+      fail(`Supabase CLI ${SUPABASE_CLI_VERSION} ${operation} timed out after ${timeoutMs} ms.`);
+    }
+    if (result.error || result.status !== 0) {
+      fail(`Supabase CLI ${SUPABASE_CLI_VERSION} ${operation} failed.`);
+    }
+    return result.stdout ?? "";
+  };
+
+  if (runCli(["--version"], "version verification").trim() !== SUPABASE_CLI_VERSION) {
+    fail(
+      `The installed Supabase CLI does not match pinned Supabase CLI version ${SUPABASE_CLI_VERSION}.`,
+    );
+  }
+
+  const stdout = runCli(
+    ["projects", "api-keys", "--project-ref", GRACE_PROJECT_REF, "--output", "json"],
+    "approved project key lookup",
+  );
   return selectApprovedPublicKey(stdout, { allowLegacy });
 }
 

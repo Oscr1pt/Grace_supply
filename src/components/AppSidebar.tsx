@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   UserCog,
+  ChartNoAxesCombined,
   Menu,
 } from "lucide-react";
 import { useAuth, type Permission } from "@/lib/auth";
@@ -89,6 +90,18 @@ function SidebarContents({ onNavigate }: { onNavigate?: () => void }) {
             </Link>
           );
         })}
+
+        {isAdmin && (
+          <Link
+            to={"/reports" as never}
+            aria-current={path === "/reports" || path.startsWith("/reports/") ? "page" : undefined}
+            onClick={onNavigate}
+            className={linkClass(path === "/reports" || path.startsWith("/reports/"))}
+          >
+            <ChartNoAxesCombined aria-hidden="true" className="h-4 w-4 shrink-0 text-neutral-400" />
+            <span>Reportes</span>
+          </Link>
+        )}
 
         {isAdmin && (
           <Link

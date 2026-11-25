@@ -32,8 +32,15 @@ function AppLayout() {
   if (!user) return <Navigate to="/login" replace />;
 
   const perm = Object.entries(routePerms).find(([p]) => path === p || path.startsWith(p + "/"))?.[1];
-  const adminOnly = path.startsWith("/team");
-  const allowed = adminOnly ? isAdmin : perm ? can(perm) : true;
+  const reportsOnly = path === "/reports" || path.startsWith("/reports/");
+  const adminOnly = path.startsWith("/team") || reportsOnly;
+  const allowed = reportsOnly
+    ? user.active && isAdmin
+    : adminOnly
+      ? isAdmin
+      : perm
+        ? can(perm)
+        : true;
 
   return (
     <div className="min-h-screen flex flex-col bg-background lg:flex-row">

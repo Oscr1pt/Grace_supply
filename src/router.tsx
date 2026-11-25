@@ -3,8 +3,9 @@ import { createRoute, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import { TeamCreateUserPage } from "./pages/TeamCreateUserPage";
 import { SetupAccountPage } from "./pages/SetupAccountPage";
+import { ReportsPage } from "./pages/ReportsPage";
 
-// Keep generated routeTree.gen.ts untouched: these two routes are deliberately
+// Keep generated routeTree.gen.ts untouched: these runtime routes are deliberately
 // registered at runtime so the protected generated file remains user-owned.
 type RuntimeRoute = {
   id: string;
@@ -18,7 +19,7 @@ const appRoute = rootChildren.find((route) => route.options?.id === "/_app");
 if (!appRoute) throw new Error("The authenticated application route is unavailable.");
 const appChildren = appRoute.children ?? [];
 if (
-  !appChildren.some(
+  !(appRoute.children ?? []).some(
     (route) => route.options?.id === "/team/new" || route.options?.path === "/team/new",
   )
 ) {
@@ -27,7 +28,19 @@ if (
     path: "/team/new",
     component: TeamCreateUserPage,
   }) as unknown as RuntimeRoute;
-  appRoute.addChildren([...appChildren, teamCreateRoute]);
+  appRoute.addChildren([...(appRoute.children ?? []), teamCreateRoute]);
+}
+if (
+  !(appRoute.children ?? []).some(
+    (route) => route.options?.id === "/reports" || route.options?.path === "/reports",
+  )
+) {
+  const reportsRoute = createRoute({
+    getParentRoute: () => appRoute as never,
+    path: "/reports",
+    component: ReportsPage,
+  }) as unknown as RuntimeRoute;
+  appRoute.addChildren([...(appRoute.children ?? []), reportsRoute]);
 }
 if (
   !rootChildren.some(

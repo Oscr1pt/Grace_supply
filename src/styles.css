@@ -206,6 +206,50 @@
   }
 }
 
+@media print {
+  body:has(.business-report-print-root) > *:not(:has(.business-report-print-root)) {
+    display: none !important;
+  }
+
+  body:has(.business-report-print-root) {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  body:has(.business-report-print-root) .reports-no-print,
+  body:has(.business-report-print-root) .reports-interactive-controls {
+    display: none !important;
+  }
+
+  body:has(.business-report-print-root) .business-report-print-root {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: #111 !important;
+    background: #fff !important;
+  }
+
+  .business-report-print-root [data-testid="report-sales-expenses-chart"],
+  .business-report-print-root [data-testid="report-expense-categories-chart"] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .business-report-print-root .report-print-chart-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .business-report-print-root .recharts-responsive-container {
+    min-height: 260px;
+  }
+
+  .business-report-print-root [data-testid="report-metric-value"] {
+    color: #111 !important;
+  }
+}
+
 @media (max-width: 1023px) {
   div.rounded-xl:has(> table),
   div.rounded-lg:has(> table) {

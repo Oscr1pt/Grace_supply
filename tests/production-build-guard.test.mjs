@@ -43,6 +43,117 @@ function assertConfigRejected(env, trustedKey = { type: "publishable", api_key: 
   );
 }
 
+function writePinnedSupabaseCliFixture(
+  root,
+  { reportedVersion = "2.121.0", hangOnKeys = false } = {},
+) {
+  const platform =
+    process.platform === "win32"
+      ? "windows"
+      : process.platform === "darwin"
+        ? "darwin"
+        : process.platform === "linux"
+          ? "linux"
+          : null;
+  assert.ok(platform, `unsupported fixture platform: ${process.platform}`);
+  const platformPackage = `@supabase/cli-${platform}-${process.arch}`;
+  const platformRelativePath = `node_modules/${platformPackage}`;
+  const packagePath = path.join(root, "node_modules", "supabase");
+  const platformPath = path.join(root, ...platformRelativePath.split("/"));
+  const resolvedPackage = "https://registry.npmjs.org/supabase/-/supabase-2.121.0.tgz";
+  const resolvedPlatform = `https://registry.npmjs.org/${platformPackage}/-/cli-${platform}-${process.arch}-2.121.0.tgz`;
+  const integrity = `sha512-${Buffer.from("synthetic-test-integrity").toString("base64")}`;
+
+  writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({ devDependencies: { supabase: "2.121.0" } }),
+  );
+  mkdirSync(path.join(packagePath, "dist"), { recursive: true });
+  mkdirSync(platformPath, { recursive: true });
+  writeFileSync(
+    path.join(packagePath, "package.json"),
+    JSON.stringify({
+      name: "supabase",
+      version: "2.121.0",
+      optionalDependencies: { [platformPackage]: "2.121.0" },
+    }),
+  );
+  writeFileSync(
+    path.join(platformPath, "package.json"),
+    JSON.stringify({ name: platformPackage, version: "2.121.0" }),
+  );
+  writeFileSync(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        "": { devDependencies: { supabase: "2.121.0" } },
+        "node_modules/supabase": {
+          version: "2.121.0",
+          resolved: resolvedPackage,
+          integrity,
+          optionalDependencies: { [platformPackage]: "2.121.0" },
+        },
+        [platformRelativePath]: {
+          version: "2.121.0",
+          resolved: resolvedPlatform,
+          integrity,
+          optional: true,
+        },
+      },
+    }),
+  );
+  const apiKey = "sb_publishable_abcdefghijklmnopqrstuv_ABCDEFGH";
+  writeFileSync(
+    path.join(packagePath, "dist", "supabase.js"),
+    `if (process.argv.includes("--version")) { console.log(${JSON.stringify(reportedVersion)}); } else if (${hangOnKeys}) { setInterval(() => {}, 1000); } else { console.log(JSON.stringify([{ type: "publishable", api_key: ${JSON.stringify(apiKey)} }])); }`,
+  );
+  return apiKey;
+}
+
+test("approved public key lookup uses the local lockfile-pinned CLI without npm exec", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "grace-pinned-supabase-cli-"));
+  const apiKey = writePinnedSupabaseCliFixture(root);
+  const previousNpmExecPath = process.env.npm_execpath;
+  delete process.env.npm_execpath;
+  try {
+    assert.deepEqual(guard.getApprovedPublicKey({ cwd: root, timeoutMs: 2_000 }), {
+      type: "publishable",
+      api_key: apiKey,
+    });
+  } finally {
+    if (previousNpmExecPath === undefined) delete process.env.npm_execpath;
+    else process.env.npm_execpath = previousNpmExecPath;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("approved public key lookup rejects a CLI version different from the pin", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "grace-pinned-supabase-cli-"));
+  writePinnedSupabaseCliFixture(root, { reportedVersion: "2.122.0" });
+  try {
+    assert.throws(
+      () => guard.getApprovedPublicKey({ cwd: root, timeoutMs: 2_000 }),
+      /pinned Supabase CLI version/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("approved public key lookup stops a stalled CLI subprocess within its timeout", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "grace-pinned-supabase-cli-"));
+  writePinnedSupabaseCliFixture(root, { hangOnKeys: true });
+  try {
+    assert.throws(
+      () => guard.getApprovedPublicKey({ cwd: root, timeoutMs: 100 }),
+      /timed out after 100 ms/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("accepts only the approved project URL, full active publishable key, flags, and UTC cutoff", () => {
   assert.ok(
     Date.parse(cutoff) < Date.now(),
