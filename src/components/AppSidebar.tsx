@@ -34,7 +34,6 @@ const items = [
   { to: "/sales", label: "Ventas", icon: Receipt, perm: "sales" as Permission },
   { to: "/purchases", label: "Compras", icon: ShoppingBag, perm: "purchases" as Permission },
   { to: "/expenses", label: "Gastos", icon: Wallet, perm: "expenses" as Permission },
-  { to: "/settings", label: "Ajustes", icon: Settings, perm: "settings" as Permission },
 ] as const;
 
 function Brand() {
@@ -46,7 +45,9 @@ function Brand() {
         className="h-10 w-10 shrink-0 rounded-full border border-[#D4AF37]/50 object-contain shadow-md shadow-[#D4AF37]/10"
       />
       <div className="min-w-0 overflow-hidden">
-        <p className="truncate font-display text-lg font-bold leading-tight tracking-wider text-white">GRACE SUPPLY</p>
+        <p className="truncate font-display text-lg font-bold leading-tight tracking-wider text-white">
+          GRACE SUPPLY
+        </p>
         <p className="mt-0.5 truncate text-[9px] font-semibold uppercase tracking-[0.2em] text-[#D4AF37]">
           Barbería &amp; Belleza
         </p>
@@ -73,7 +74,10 @@ function SidebarContents({ onNavigate }: { onNavigate?: () => void }) {
         <Brand />
       </div>
 
-      <nav aria-label="Navegación principal" className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-4">
+      <nav
+        aria-label="Navegación principal"
+        className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-4"
+      >
         {visible.map((item) => {
           const active = path === item.to || path.startsWith(item.to + "/");
           const Icon = item.icon;
@@ -85,7 +89,10 @@ function SidebarContents({ onNavigate }: { onNavigate?: () => void }) {
               onClick={onNavigate}
               className={linkClass(active)}
             >
-              <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${active ? "text-[#D4AF37]" : "text-neutral-400"}`} />
+              <Icon
+                aria-hidden="true"
+                className={`h-4 w-4 shrink-0 ${active ? "text-[#D4AF37]" : "text-neutral-400"}`}
+              />
               <span>{item.label}</span>
             </Link>
           );
@@ -110,8 +117,32 @@ function SidebarContents({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             className={linkClass(path.startsWith("/team"))}
           >
-            <UserCog aria-hidden="true" className={`h-4 w-4 shrink-0 ${path.startsWith("/team") ? "text-[#D4AF37]" : "text-neutral-400"}`} />
+            <UserCog
+              aria-hidden="true"
+              className={`h-4 w-4 shrink-0 ${path.startsWith("/team") ? "text-[#D4AF37]" : "text-neutral-400"}`}
+            />
             <span>Empleados</span>
+          </Link>
+        )}
+
+        {can("settings") && (
+          <Link
+            to="/settings"
+            aria-current={
+              path === "/settings" || path.startsWith("/settings/") ? "page" : undefined
+            }
+            onClick={onNavigate}
+            className={linkClass(path === "/settings" || path.startsWith("/settings/"))}
+          >
+            <Settings
+              aria-hidden="true"
+              className={`h-4 w-4 shrink-0 ${
+                path === "/settings" || path.startsWith("/settings/")
+                  ? "text-[#D4AF37]"
+                  : "text-neutral-400"
+              }`}
+            />
+            <span>Ajustes</span>
           </Link>
         )}
       </nav>
@@ -127,7 +158,10 @@ function SidebarContents({ onNavigate }: { onNavigate?: () => void }) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => { onNavigate?.(); void logout(); }}
+          onClick={() => {
+            onNavigate?.();
+            void logout();
+          }}
           className="mt-3 h-10 w-full justify-start border border-[#262626] text-neutral-300 hover:bg-[#171717] hover:text-[#FF6B6B]"
         >
           <LogOut aria-hidden="true" className="mr-2 h-4 w-4" />
@@ -159,7 +193,10 @@ export function AppSidebar() {
         </SheetTrigger>
       </header>
 
-      <aside aria-label="Barra lateral" className="no-print hidden h-svh max-h-screen w-64 shrink-0 border-r border-[#262626] bg-[#050505] lg:sticky lg:top-0 lg:flex lg:flex-col">
+      <aside
+        aria-label="Barra lateral"
+        className="no-print hidden h-svh max-h-screen w-64 shrink-0 border-r border-[#262626] bg-[#050505] lg:sticky lg:top-0 lg:flex lg:flex-col"
+      >
         <SidebarContents />
       </aside>
 
