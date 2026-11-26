@@ -4,6 +4,7 @@ import { useSupabaseView, fmtMoney, fmtDate } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
 import type { Purchase } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
+import { SearchableEntitySelect } from "@/components/SearchableEntitySelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -751,7 +752,8 @@ function PurchasesPage() {
                       label="Proveedor registrado"
                       labelId="purchase-supplier-registered-label"
                     >
-                      <Select
+                      <SearchableEntitySelect
+                        options={suppliers}
                         value={supplierId}
                         onValueChange={(v) => {
                           setSupplierId(v);
@@ -759,21 +761,46 @@ function PurchasesPage() {
                           const s = suppliers.find((x) => x.id === v);
                           if (s) setForm({ ...form, supplier: s.name });
                         }}
-                      >
-                        <SelectTrigger aria-labelledby="purchase-supplier-registered-label">
-                          <SelectValue placeholder="Elige un proveedor" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {suppliers.map((s) => (
-                            <SelectItem key={s.id} value={s.id} disabled={s.status !== "activo"}>
-                              {s.name} · ID {s.id.slice(0, 8)} ·{" "}
-                              {s.status === "activo" ? "Activo" : "Inactivo"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        getOptionValue={(supplier) => supplier.id}
+                        getSearchFields={(supplier) => [
+                          supplier.name,
+                          supplier.rnc,
+                          supplier.id,
+                          supplier.status,
+                        ]}
+                        isOptionDisabled={(supplier) => supplier.status !== "activo"}
+                        renderOption={(supplier) => (
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate font-medium">{supplier.name}</span>
+                            <span className="truncate text-xs text-muted-foreground">
+                              {supplier.rnc ? `RNC ${supplier.rnc} · ` : ""}
+                              ID {supplier.id.slice(0, 8)} · {supplier.status}
+                            </span>
+                          </span>
+                        )}
+                        renderValue={(supplier) => supplier.name}
+                        placeholder={
+                          suppliers.length ? "Elige un proveedor" : "No hay proveedores disponibles"
+                        }
+                        searchPlaceholder="Buscar por nombre, RNC o ID…"
+                        emptyMessage="No se encontraron proveedores."
+                        aria-labelledby="purchase-supplier-registered-label"
+                        aria-invalid={Boolean(purchaseValidationErrors.supplierId)}
+                        aria-describedby={
+                          purchaseValidationErrors.supplierId
+                            ? "purchase-supplier-error"
+                            : undefined
+                        }
+                        className={
+                          purchaseValidationErrors.supplierId ? "border-destructive" : undefined
+                        }
+                      />
                       {purchaseValidationErrors.supplierId && (
-                        <p role="alert" className="text-xs text-destructive">
+                        <p
+                          id="purchase-supplier-error"
+                          role="alert"
+                          className="text-xs text-destructive"
+                        >
                           {purchaseValidationErrors.supplierId}
                         </p>
                       )}
@@ -985,7 +1012,8 @@ function PurchasesPage() {
                                 label={`Producto ${index + 1}`}
                                 labelId={`purchase-line-product-label-${index}`}
                               >
-                                <Select
+                                <SearchableEntitySelect
+                                  options={inventory}
                                   value={line.itemId}
                                   onValueChange={(value) => {
                                     updatePurchaseLines((current) =>
@@ -996,46 +1024,47 @@ function PurchasesPage() {
                                       ),
                                     );
                                   }}
-                                >
-                                  <SelectTrigger
-                                    ref={(element) => setLineFieldRef(line.key, "itemId", element)}
-                                    className={
-                                      purchaseValidationErrors.lineErrors?.[line.key]?.itemId
-                                        ? "border-destructive focus-visible:ring-destructive"
-                                        : undefined
-                                    }
-                                    aria-labelledby={`purchase-line-product-label-${index}`}
-                                    aria-invalid={Boolean(
-                                      purchaseValidationErrors.lineErrors?.[line.key]?.itemId,
-                                    )}
-                                    aria-describedby={
-                                      purchaseValidationErrors.lineErrors?.[line.key]?.itemId
-                                        ? `purchase-line-error-${line.key}-itemId`
-                                        : undefined
-                                    }
-                                  >
-                                    <SelectValue placeholder="Elige un producto" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {inventory.map((item) => {
-                                      const alreadySelected = purchaseLines.some(
-                                        (other) =>
-                                          other.key !== line.key &&
-                                          other.kind === "linked" &&
-                                          other.itemId === item.id,
-                                      );
-                                      return (
-                                        <SelectItem
-                                          key={item.id}
-                                          value={item.id}
-                                          disabled={alreadySelected}
-                                        >
-                                          {item.sku} — {item.name} · Stock {item.quantity}
-                                        </SelectItem>
-                                      );
-                                    })}
-                                  </SelectContent>
-                                </Select>
+                                  getOptionValue={(item) => item.id}
+                                  getSearchFields={(item) => [item.name, item.sku, item.id]}
+                                  isOptionDisabled={(item) =>
+                                    purchaseLines.some(
+                                      (other) =>
+                                        other.key !== line.key &&
+                                        other.kind === "linked" &&
+                                        other.itemId === item.id,
+                                    )
+                                  }
+                                  renderOption={(item) => (
+                                    <span className="flex min-w-0 flex-col">
+                                      <span className="truncate font-medium">{item.name}</span>
+                                      <span className="truncate text-xs text-muted-foreground">
+                                        {item.sku} · Stock {item.quantity} · ID{" "}
+                                        {item.id.slice(0, 8)}
+                                      </span>
+                                    </span>
+                                  )}
+                                  renderValue={(item) => `${item.sku} — ${item.name}`}
+                                  placeholder="Elige un producto"
+                                  searchPlaceholder="Buscar por nombre, SKU o código…"
+                                  emptyMessage="No se encontraron productos."
+                                  triggerRef={(element) =>
+                                    setLineFieldRef(line.key, "itemId", element)
+                                  }
+                                  aria-labelledby={`purchase-line-product-label-${index}`}
+                                  aria-invalid={Boolean(
+                                    purchaseValidationErrors.lineErrors?.[line.key]?.itemId,
+                                  )}
+                                  aria-describedby={
+                                    purchaseValidationErrors.lineErrors?.[line.key]?.itemId
+                                      ? `purchase-line-error-${line.key}-itemId`
+                                      : undefined
+                                  }
+                                  className={
+                                    purchaseValidationErrors.lineErrors?.[line.key]?.itemId
+                                      ? "border-destructive focus-visible:ring-destructive"
+                                      : undefined
+                                  }
+                                />
                                 {purchaseValidationErrors.lineErrors?.[line.key]?.itemId && (
                                   <p
                                     id={`purchase-line-error-${line.key}-itemId`}

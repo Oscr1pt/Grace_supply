@@ -5,6 +5,7 @@ import { useSettings } from "@/lib/settings";
 import type { Sale, SaleLine } from "@/lib/types";
 import { isReceiptPolicyApplicable, receiptPolicyCopy } from "@/lib/receiptPolicy.js";
 import { PageHeader } from "@/components/PageHeader";
+import { SearchableEntitySelect } from "@/components/SearchableEntitySelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -858,35 +859,42 @@ function SalesPage() {
                   {customerMode === "registered" ? (
                     <div className="space-y-1.5">
                       <Label htmlFor="sale-client">Cliente activo</Label>
-                      <Select
+                      <SearchableEntitySelect
+                        id="sale-client"
+                        options={clients.filter((client) => client.status === "activo")}
                         value={clientId}
-                        onValueChange={(value) => {
-                          setClientId(value);
+                        onValueChange={(nextClientId) => {
+                          setClientId(nextClientId);
                           setSaleValidationErrors({});
                         }}
-                      >
-                        <SelectTrigger id="sale-client">
-                          <SelectValue
-                            placeholder={
-                              clients.length ? "Elige un cliente" : "No hay clientes disponibles"
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {clients
-                            .filter((c) => c.status === "activo")
-                            .map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {c.name} · ID {c.id.slice(0, 8)}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
+                        getOptionValue={(client) => client.id}
+                        getSearchFields={(client) => [client.name, client.id]}
+                        renderOption={(client) => (
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate">{client.name}</span>
+                            <span className="truncate text-xs text-muted-foreground">
+                              ID {client.id.slice(0, 8)}
+                            </span>
+                          </span>
+                        )}
+                        renderValue={(client) => client.name}
+                        placeholder={
+                          clients.some((client) => client.status === "activo")
+                            ? "Elige un cliente"
+                            : "No hay clientes disponibles"
+                        }
+                        searchPlaceholder="Buscar por nombre o ID…"
+                        emptyMessage="No se encontraron clientes activos."
+                        aria-invalid={Boolean(saleValidationErrors.clientId)}
+                        aria-describedby={
+                          saleValidationErrors.clientId ? "sale-client-error" : undefined
+                        }
+                      />
                       <p className="text-xs text-muted-foreground">
                         El UUID identifica al cliente aunque haya nombres iguales.
                       </p>
                       {saleValidationErrors.clientId && (
-                        <p role="alert" className="text-xs text-destructive">
+                        <p id="sale-client-error" role="alert" className="text-xs text-destructive">
                           {saleValidationErrors.clientId}
                         </p>
                       )}
@@ -1004,22 +1012,36 @@ function SalesPage() {
 
                 <div className="rounded-md border border-border">
                   <div className="p-3 flex gap-2 border-b border-border bg-muted/30">
-                    <Select value={pickItem} onValueChange={setPickItem}>
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Selecciona producto para agregar" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {inventory.map((i) => (
-                          <SelectItem key={i.id} value={i.id} disabled={Number(i.quantity) < 1}>
-                            {i.sku} — {i.name} · ID {i.id.slice(0, 8)} ·{" "}
-                            {Number(i.quantity) > 0
-                              ? `${i.quantity} disponibles`
-                              : "Sin existencia"}{" "}
-                            · {fmtMoney(i.price, settings.currency)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableEntitySelect
+                      options={inventory}
+                      value={pickItem}
+                      onValueChange={setPickItem}
+                      getOptionValue={(item) => item.id}
+                      getSearchFields={(item) => [item.name, item.sku, item.id]}
+                      isOptionDisabled={(item) => Number(item.quantity) < 1}
+                      renderOption={(item) => (
+                        <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">{item.name}</span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {item.sku} · ID {item.id.slice(0, 8)}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {Number(item.quantity) > 0
+                              ? `${item.quantity} disponibles`
+                              : "Sin existencia"}
+                            {" · "}
+                            {fmtMoney(item.price, settings.currency)}
+                          </span>
+                        </span>
+                      )}
+                      renderValue={(item) => `${item.sku} — ${item.name}`}
+                      placeholder="Selecciona producto para agregar"
+                      searchPlaceholder="Buscar por nombre, SKU o código…"
+                      emptyMessage="No se encontraron productos."
+                      className="flex-1"
+                    />
                     <Button
                       onClick={addLine}
                       disabled={!pickItem}
