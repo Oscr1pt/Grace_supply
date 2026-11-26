@@ -2,14 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { cloneElement, isValidElement, useEffect, useRef, useState } from "react";
 import { useSupabaseTable, uid, fmtDate, fmtMoney } from "@/lib/storage";
 import { useSettings } from "@/lib/settings";
-import type {
-  Client,
-  ClientCredit,
-  CreditPayment,
-  Sale,
-  PaymentMethod,
-  CreditStatus,
-} from "@/lib/types";
+import type { Client, ClientCredit, CreditPayment, PaymentMethod, CreditStatus } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,10 +45,12 @@ import {
   UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
-import { PersistenceError, userPersistenceMessage } from "@/lib/persistence.js";
+import { PersistenceError, persistenceFailure, userPersistenceMessage } from "@/lib/persistence.js";
 import { getConfirmedBusinessOperation, postBusinessOperation } from "@/lib/businessOperations";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
+import { checkClientHasHistory, setClientDeleteHistoryFailure } from "@/lib/clientSales.js";
+import { useClientSalesHistory } from "@/lib/useClientSalesHistory";
 import type { UUID } from "@/lib/database.types";
 import {
   clearPendingCreditPayment,
@@ -92,7 +87,7 @@ const emptyClient: Omit<Client, "id" | "createdAt"> = {
 };
 
 function ClientsPage() {
-  const { user, can } = useAuth();
+  const { user, can, scopeKey } = useAuth();
   const canViewSales = can("sales") || can("clients");
   const clientsTable = useSupabaseTable<Client>("clients");
   const { data: clients, insert, update, remove } = clientsTable;
@@ -112,8 +107,6 @@ function ClientsPage() {
     can("clients"),
   );
   const { data: payments, refresh: refreshPayments } = paymentsTable;
-  const salesTable = useSupabaseTable<Sale>("sales", "created_at", false, "*", canViewSales);
-  const { data: sales } = salesTable;
   const [settings] = useSettings();
   const paymentInFlight = useRef(false);
 
@@ -132,7 +125,20 @@ function ClientsPage() {
   // Credit & Sales History Modals
   const [selectedClientForCredits, setSelectedClientForCredits] = useState<Client | null>(null);
   const [selectedClientForHistory, setSelectedClientForHistory] = useState<Client | null>(null);
+  const clientSalesHistory = useClientSalesHistory(
+    selectedClientForHistory?.id ?? null,
+    canViewSales,
+  );
   const [creditFilter, setCreditFilter] = useState<"todas" | CreditStatus>("todas");
+  const [historyCheck, setHistoryCheck] = useState<{
+    clientId: string | null;
+    loading: boolean;
+    checked: boolean;
+    hasHistory: boolean;
+    error: string | null;
+  }>({ clientId: null, loading: false, checked: false, hasHistory: false, error: null });
+  const historyCheckRequest = useRef(0);
+  const historyCheckAbort = useRef<AbortController | null>(null);
 
   // Payment registration
   const [paymentCredit, setPaymentCredit] = useState<ClientCredit | null>(null);
@@ -180,6 +186,51 @@ function ClientsPage() {
     setPayNote(String(pendingPayment.request.note ?? ""));
     setPaymentNeedsReconciliation(true);
   }, [pendingPayment, user?.authUserId, credits]);
+
+  useEffect(() => {
+    const clientId = partyToRemove?.id ?? null;
+    const request = ++historyCheckRequest.current;
+    historyCheckAbort.current?.abort();
+    if (!clientId || !canViewSales) {
+      setHistoryCheck({
+        clientId,
+        loading: false,
+        checked: false,
+        hasHistory: false,
+        error: clientId ? "No se pudo verificar el historial con los permisos actuales." : null,
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    historyCheckAbort.current = controller;
+    setHistoryCheck({ clientId, loading: true, checked: false, hasHistory: false, error: null });
+    const isCurrent = () => historyCheckRequest.current === request && !controller.signal.aborted;
+
+    void checkClientHasHistory(supabase, clientId, controller.signal)
+      .then((hasHistory) => {
+        if (!isCurrent()) return;
+        setHistoryCheck({ clientId, loading: false, checked: true, hasHistory, error: null });
+        setClientDeleteHistoryFailure(null);
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent()) return;
+        const message = userPersistenceMessage(persistenceFailure(error));
+        setHistoryCheck({
+          clientId,
+          loading: false,
+          checked: false,
+          hasHistory: false,
+          error: message,
+        });
+        setClientDeleteHistoryFailure(message);
+      });
+
+    return () => {
+      controller.abort();
+      if (historyCheckRequest.current === request) historyCheckRequest.current += 1;
+    };
+  }, [canViewSales, partyToRemove?.id, scopeKey]);
 
   const startNew = () => {
     setEditing(null);
@@ -253,20 +304,34 @@ function ClientsPage() {
     }
   };
 
+  const historyCheckMatchesClient =
+    Boolean(partyToRemove) && historyCheck.clientId === partyToRemove?.id;
   const historyCheckReady =
     canViewSales &&
-    !salesTable.loading &&
-    !salesTable.stale &&
-    !salesTable.loadError &&
-    !creditsTable.loading &&
-    !creditsTable.stale &&
-    !creditsTable.loadError;
-  const clientHasHistory = Boolean(
-    partyToRemove &&
-    (sales.some((sale) => sale.clientId === partyToRemove.id) ||
-      credits.some((credit) => credit.clientId === partyToRemove.id)),
+    historyCheckMatchesClient &&
+    !historyCheck.loading &&
+    historyCheck.checked &&
+    !historyCheck.error;
+  const clientHasHistory =
+    historyCheckMatchesClient && historyCheck.checked && historyCheck.hasHistory;
+  const historyCheckPending = Boolean(
+    partyToRemove && (!historyCheckMatchesClient || historyCheck.loading),
   );
-  const removeClient = (client: Client) => setPartyToRemove(client);
+  const historyCheckFailed = Boolean(
+    partyToRemove && historyCheckMatchesClient && !historyCheck.loading && !historyCheckReady,
+  );
+  const removeClient = (client: Client) => {
+    historyCheckAbort.current?.abort();
+    historyCheckRequest.current += 1;
+    setHistoryCheck({
+      clientId: client.id,
+      loading: true,
+      checked: false,
+      hasHistory: false,
+      error: null,
+    });
+    setPartyToRemove(client);
+  };
 
   const confirmRemoveClient = async (deactivate: boolean) => {
     const client = partyToRemove;
@@ -279,17 +344,46 @@ function ClientsPage() {
       return;
     partyActionInFlight.current = true;
     setPending(true);
+    let verifyingHistory = false;
     try {
       if (deactivate) {
         await update(client.id, { status: "inactivo" });
         toast.success("Cliente desactivado; su historial se conserva.");
       } else {
+        verifyingHistory = true;
+        const hasHistory = await checkClientHasHistory(supabase, client.id);
+        verifyingHistory = false;
+        setHistoryCheck({
+          clientId: client.id,
+          loading: false,
+          checked: true,
+          hasHistory,
+          error: null,
+        });
+        setClientDeleteHistoryFailure(null);
+        if (hasHistory) {
+          toast.error(
+            "El cliente tiene ventas o créditos relacionados; solo se permite desactivarlo.",
+          );
+          return;
+        }
         await remove(client.id);
         toast.success("Cliente eliminado");
       }
       setPartyToRemove(null);
     } catch (error) {
-      toast.error(userPersistenceMessage(error));
+      if (verifyingHistory) {
+        const message = userPersistenceMessage(persistenceFailure(error));
+        setHistoryCheck({
+          clientId: client.id,
+          loading: false,
+          checked: false,
+          hasHistory: false,
+          error: message,
+        });
+        setClientDeleteHistoryFailure(message);
+      }
+      toast.error(userPersistenceMessage(persistenceFailure(error)));
     } finally {
       partyActionInFlight.current = false;
       setPending(false);
@@ -472,10 +566,7 @@ function ClientsPage() {
     return cr.status === creditFilter;
   });
 
-  // Client Sales History
-  const clientSales = selectedClientForHistory
-    ? sales.filter((s) => s.clientId === selectedClientForHistory.id)
-    : [];
+  const clientSales = clientSalesHistory.data;
 
   return (
     <div>
@@ -830,7 +921,10 @@ function ClientsPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => setSelectedClientForHistory(c)}
+                              onClick={() => {
+                                clientSalesHistory.setPage(0);
+                                setSelectedClientForHistory(c);
+                              }}
                               aria-label={`Ver ventas de ${c.name}`}
                               title="Historial de Ventas"
                               className="h-8 px-2 text-xs hover:border-[#D4AF37] hover:text-[#D4AF37]"
@@ -1263,7 +1357,12 @@ function ClientsPage() {
       {/* Client Sales History Dialog */}
       <Dialog
         open={!!selectedClientForHistory}
-        onOpenChange={(o) => !o && setSelectedClientForHistory(null)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setSelectedClientForHistory(null);
+            clientSalesHistory.setPage(0);
+          }
+        }}
       >
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1273,13 +1372,13 @@ function ClientsPage() {
             </DialogTitle>
           </DialogHeader>
 
-          {salesTable.loadError && (
+          {clientSalesHistory.error && (
             <div
               role="alert"
               className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 p-3 text-sm"
             >
-              <span>No se pudo cargar el historial: {salesTable.loadError}</span>
-              <Button variant="outline" onClick={() => void salesTable.refresh()}>
+              <span>No se pudo cargar el historial: {clientSalesHistory.error}</span>
+              <Button variant="outline" onClick={() => void clientSalesHistory.refresh()}>
                 Reintentar
               </Button>
             </div>
@@ -1302,7 +1401,7 @@ function ClientsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
-                {salesTable.loading && sales.length === 0 ? (
+                {clientSalesHistory.loading && clientSales.length === 0 ? (
                   <tr>
                     <td
                       colSpan={6}
@@ -1310,6 +1409,12 @@ function ClientsPage() {
                       className="text-center py-8 text-muted-foreground"
                     >
                       Cargando historial de ventas…
+                    </td>
+                  </tr>
+                ) : clientSalesHistory.error ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-8 text-muted-foreground">
+                      No se pudo confirmar el historial. Reintenta la consulta.
                     </td>
                   </tr>
                 ) : clientSales.length === 0 ? (
@@ -1356,6 +1461,34 @@ function ClientsPage() {
             </table>
           </div>
 
+          {!clientSalesHistory.error &&
+            !clientSalesHistory.loading &&
+            (clientSales.length > 0 || clientSalesHistory.page > 0) && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">
+                  Página {clientSalesHistory.page + 1}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={clientSalesHistory.page === 0}
+                    onClick={() => clientSalesHistory.setPage((page) => Math.max(0, page - 1))}
+                  >
+                    Ventas más recientes
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!clientSalesHistory.hasMore}
+                    onClick={() => clientSalesHistory.setPage((page) => page + 1)}
+                  >
+                    Ventas anteriores
+                  </Button>
+                </div>
+              </div>
+            )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setSelectedClientForHistory(null)}>
               Cerrar
@@ -1375,16 +1508,20 @@ function ClientsPage() {
             <AlertDialogTitle>
               {clientHasHistory
                 ? "Conservar historial del cliente"
-                : !historyCheckReady
-                  ? "No se pudo verificar el historial"
-                  : "Eliminar o desactivar cliente"}
+                : historyCheckPending
+                  ? "Verificando historial del cliente"
+                  : historyCheckFailed
+                    ? "No se pudo verificar el historial"
+                    : "Eliminar o desactivar cliente"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {clientHasHistory
                 ? `${partyToRemove?.name} tiene ventas o créditos relacionados. Solo se permite desactivarlo; sus documentos y pagos se conservan.`
-                : !historyCheckReady
-                  ? "No hay una lectura completa y autorizada de ventas y créditos. Por seguridad no se habilita el borrado; puedes desactivar el cliente y reintentar la verificación después."
-                  : `No encontramos ventas ni créditos relacionados con ${partyToRemove?.name}. El borrado depende de esta verificación y de las restricciones referenciales del servidor.`}
+                : historyCheckPending
+                  ? "Estamos comprobando directamente si existen ventas o créditos relacionados."
+                  : historyCheckFailed
+                    ? `No hay una lectura completa y autorizada de ventas y créditos. Por seguridad no se habilita el borrado. ${historyCheck.error ?? "Puedes reintentar la verificación."}`
+                    : `No encontramos ventas ni créditos relacionados con ${partyToRemove?.name}. El borrado depende de esta verificación y de las restricciones referenciales del servidor.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
