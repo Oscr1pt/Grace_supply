@@ -24,19 +24,33 @@ test("renders synthetic report, responsive charts, and matching print view", asy
     page.getByTestId("report-expense-categories-chart").locator(".recharts-bar-rectangle"),
   ).toHaveCount(16);
   await expect(page.getByText("Sin ITBIS · ventas no anuladas", { exact: true })).toBeVisible();
-  await expect(page.getByTestId("report-period-range")).toContainText("16");
-  await expect(page.getByTestId("report-period-range")).toContainText("22");
+  const weekAnchor = new Date(
+    `${await page.getByLabel("Seleccionar semana").inputValue()}T00:00:00Z`,
+  );
+  const mondayOffset = (weekAnchor.getUTCDay() + 6) % 7;
+  const weekStart = new Date(weekAnchor);
+  weekStart.setUTCDate(weekStart.getUTCDate() - mondayOffset);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+  await expect(page.getByTestId("report-period-range")).toContainText(
+    String(weekStart.getUTCDate()),
+  );
+  await expect(page.getByTestId("report-period-range")).toContainText(String(weekEnd.getUTCDate()));
 
   await page.getByLabel("Tipo de período").selectOption("month");
-  await expect(page.getByLabel("Seleccionar mes")).toHaveValue("2026-11");
+  const monthInput = page.getByLabel("Seleccionar mes");
+  await expect(monthInput).toHaveValue(/^\d{4}-\d{2}$/);
+  const [monthYear, monthNumber] = (await monthInput.inputValue()).split("-").map(Number);
+  const daysInMonth = new Date(monthYear, monthNumber, 0).getDate();
   await expect(page.getByTestId("report-period-range")).toContainText("1");
-  await expect(page.getByTestId("report-period-range")).toContainText("30");
+  await expect(page.getByTestId("report-period-range")).toContainText(String(daysInMonth));
   await expect(
     page.getByTestId("report-sales-expenses-chart").locator(".recharts-bar-rectangle"),
   ).toHaveCount(12);
 
   await page.getByLabel("Tipo de período").selectOption("year");
-  await expect(page.getByLabel("Seleccionar año")).toHaveValue("2026");
+  const currentYear = await page.getByLabel("Seleccionar año").getAttribute("max");
+  await expect(page.getByLabel("Seleccionar año")).toHaveValue(currentYear ?? "");
   await expect(page.getByTestId("report-sales-expenses-chart")).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -77,7 +91,7 @@ test("renders synthetic report, responsive charts, and matching print view", asy
       window.__printCount += 1;
     };
   });
-  await page.getByRole("button", { name: "Imprimir / Guardar PDF" }).click();
+  await page.getByRole("button", { name: "Generar PDF" }).click();
   expect(await page.evaluate(() => window.__printCount)).toBe(1);
 
   await page.emulateMedia({ media: "print" });
@@ -123,7 +137,7 @@ test("does not show zero values as a substitute for loading, failure, or denial"
   await page.getByRole("button", { name: "Preview: carga" }).click();
   await expect(page.getByRole("status")).toContainText(/cargando/i);
   await expect(page.getByText("RD$ 0.00")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Imprimir / Guardar PDF" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Generar PDF" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Preview: error" }).click();
   await expect(page.getByRole("alert")).toContainText(/no se pudo cargar/i);
@@ -131,15 +145,73 @@ test("does not show zero values as a substitute for loading, failure, or denial"
 
   await page.getByRole("button", { name: "Preview: denegado" }).click();
   await expect(page.getByRole("alert")).toContainText(/solo administradores/i);
-  await expect(page.getByRole("button", { name: "Imprimir / Guardar PDF" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Generar PDF" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Preview: vacío" }).click();
   await expect(page.getByRole("status")).toContainText(/no hay movimientos/i);
   await expect(page.getByText("RD$ 0.00", { exact: true })).toHaveCount(4);
-  await expect(page.getByRole("button", { name: "Imprimir / Guardar PDF" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Generar PDF" })).toBeEnabled();
   await expect(page.getByTestId("report-summary")).toContainText(
     /documentos anulados no se incluyen/i,
   );
+});
+
+test("invalid period edits hide previous results, block printing, and recover on valid input", async ({
+  page,
+}) => {
+  await page.goto("/tests/fixtures/reports-preview.html");
+  await page.getByLabel("Tipo de período").selectOption("year");
+  const year = page.getByLabel("Seleccionar año");
+  const printButton = page.getByRole("button", { name: "Generar PDF" });
+  const currentYear = Number(await year.getAttribute("max"));
+
+  await expect(year).toHaveValue(String(currentYear));
+  await expect(page.getByTestId("report-sales-expenses-chart")).toBeVisible();
+
+  for (const partial of ["", "2", "20", "202", "20260"]) {
+    await year.fill(partial);
+    await expect(page.getByRole("alert")).toContainText(/año de cuatro dígitos/i);
+    await expect(page.getByTestId("report-sales-expenses-chart")).toHaveCount(0);
+    await expect(printButton).toBeDisabled();
+  }
+
+  await year.fill("1999");
+  await expect(page.getByRole("alert")).toContainText("2000");
+  await expect(page.getByTestId("report-metric-value")).toHaveCount(0);
+  await year.fill(String(currentYear + 1));
+  await expect(page.getByRole("alert")).toContainText(String(currentYear));
+
+  await year.fill("202");
+  await expect(printButton).toBeDisabled();
+  await year.fill(String(currentYear));
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByTestId("report-sales-expenses-chart")).toBeVisible();
+  await expect(printButton).toBeEnabled();
+
+  await page.getByLabel("Tipo de período").selectOption("week");
+  const week = page.getByLabel("Seleccionar semana");
+  const validWeek = await week.inputValue();
+  await week.fill("");
+  await expect(page.getByRole("alert")).toContainText(/fecha válida/i);
+  await expect(page.getByTestId("report-sales-expenses-chart")).toHaveCount(0);
+  await week.fill(validWeek);
+  await expect(page.getByTestId("report-sales-expenses-chart")).toBeVisible();
+
+  await page.getByLabel("Tipo de período").selectOption("month");
+  const month = page.getByLabel("Seleccionar mes");
+  const validMonth = await month.inputValue();
+  await expect(month).toHaveValue(/^\d{4}-\d{2}$/);
+  await month.fill("");
+  await expect(page.getByRole("alert")).toContainText(/mes y un año/i);
+  await expect(page.getByTestId("report-sales-expenses-chart")).toHaveCount(0);
+  await month.fill(validMonth);
+  await expect(page.getByTestId("report-sales-expenses-chart")).toBeVisible();
+
+  for (const type of ["year", "week", "month", "year"]) {
+    await page.getByLabel("Tipo de período").selectOption(type);
+    await expect(page.getByTestId("report-sales-expenses-chart")).toBeVisible();
+    await expect(printButton).toBeEnabled();
+  }
 });
 
 test("keeps report filters, period range, and print action separated across viewport widths", async ({

@@ -24,7 +24,12 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildReportSummary, formatReportMoney, toChartAmount } from "@/lib/reportPresentation.js";
-import { formatReportPeriodRange, resolveReportPeriod } from "@/lib/reportPeriods.js";
+import {
+  formatReportPeriodRange,
+  getCurrentBusinessYear,
+  resolveReportPeriod,
+  validateReportPeriodSelection,
+} from "@/lib/reportPeriods.js";
 import type {
   BusinessReportData,
   BusinessReportStatus,
@@ -63,27 +68,12 @@ type ReportsDashboardProps = {
   onRetry?: () => void;
 };
 
-function dateMathAnchor(type: ReportPeriodType, anchorDate: string) {
-  if (type === "month")
-    return anchorDate.length === 7 ? `${anchorDate}-01` : anchorDate.slice(0, 7) + "-01";
-  if (type === "year")
-    return anchorDate.length === 4 ? `${anchorDate}-01-01` : anchorDate.slice(0, 4) + "-01-01";
-  return anchorDate;
-}
-
 function selectorValue(type: ReportPeriodType, anchorDate: string) {
-  if (type === "month") return anchorDate.slice(0, 7);
-  if (type === "year") return anchorDate.slice(0, 4);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(anchorDate)) {
+    if (type === "month") return anchorDate.slice(0, 7);
+    if (type === "year") return anchorDate.slice(0, 4);
+  }
   return anchorDate;
-}
-
-function businessYearNow() {
-  return Number(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: BUSINESS_TIME_ZONE,
-      year: "numeric",
-    }).format(new Date()),
-  );
 }
 
 function formatChartMoney(value: unknown) {
@@ -94,6 +84,8 @@ function formatChartMoney(value: unknown) {
 }
 
 function ReportState({ status, onRetry }: { status: BusinessReportStatus; onRetry?: () => void }) {
+  if (status === "invalid-period") return null;
+
   if (status === "integration-pending") {
     return (
       <div
@@ -215,22 +207,34 @@ export function ReportsDashboard({
   onAnchorDateChange,
   onRetry,
 }: ReportsDashboardProps) {
-  const calcAnchor = dateMathAnchor(periodType, anchorDate);
-  const selectedRange = resolveReportPeriod(periodType, calcAnchor);
+  const selection = validateReportPeriodSelection(
+    periodType,
+    selectorValue(periodType, anchorDate),
+  );
+  const selectedRange = selection.valid
+    ? resolveReportPeriod(periodType, selection.anchorDate!)
+    : null;
   const dataMatchesSelection =
+    selection.valid &&
     !!data &&
     data.period.type === periodType &&
-    data.period.anchorDate === selectorValue(periodType, anchorDate);
+    data.period.anchorDate === selection.selectorValue;
   const awaitingSelectedPeriod =
     (status === "ready" || status === "empty") && !dataMatchesSelection;
-  const effectiveStatus = awaitingSelectedPeriod ? "loading" : status;
+  const effectiveStatus = !selection.valid
+    ? "invalid-period"
+    : awaitingSelectedPeriod
+      ? "loading"
+      : status;
   const reportVisible =
     (effectiveStatus === "ready" || effectiveStatus === "empty" || effectiveStatus === "stale") &&
     dataMatchesSelection &&
     data;
   const range = reportVisible
     ? formatReportPeriodRange(reportVisible.period.startDate, reportVisible.period.endDateExclusive)
-    : formatReportPeriodRange(selectedRange.startDate, selectedRange.endDateExclusive);
+    : selectedRange
+      ? formatReportPeriodRange(selectedRange.startDate, selectedRange.endDateExclusive)
+      : "Período no válido";
   const generatedLabel = reportVisible
     ? new Intl.DateTimeFormat("es-DO", {
         timeZone: BUSINESS_TIME_ZONE,
@@ -260,7 +264,10 @@ export function ReportsDashboard({
         : [],
     [reportVisible],
   );
-  const printable = (effectiveStatus === "ready" || effectiveStatus === "empty") && !!reportVisible;
+  const printable =
+    selection.valid &&
+    (effectiveStatus === "ready" || effectiveStatus === "empty") &&
+    !!reportVisible;
 
   const handlePrint = () => {
     if (printable && typeof window !== "undefined") window.print();
@@ -308,6 +315,8 @@ export function ReportsDashboard({
                 type="date"
                 value={selectorValue(periodType, anchorDate)}
                 onChange={(event) => onAnchorDateChange(event.target.value)}
+                aria-invalid={!selection.valid}
+                aria-describedby={!selection.valid ? "report-period-error" : undefined}
                 className="h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
                 disabled={status === "denied"}
               />
@@ -318,6 +327,8 @@ export function ReportsDashboard({
                 type="month"
                 value={selectorValue(periodType, anchorDate)}
                 onChange={(event) => onAnchorDateChange(event.target.value)}
+                aria-invalid={!selection.valid}
+                aria-describedby={!selection.valid ? "report-period-error" : undefined}
                 className="h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
                 disabled={status === "denied"}
               />
@@ -328,13 +339,20 @@ export function ReportsDashboard({
                 type="number"
                 inputMode="numeric"
                 min="2000"
-                max={businessYearNow()}
+                max={getCurrentBusinessYear()}
                 step="1"
                 value={selectorValue(periodType, anchorDate)}
                 onChange={(event) => onAnchorDateChange(event.target.value)}
+                aria-invalid={!selection.valid}
+                aria-describedby={!selection.valid ? "report-period-error" : undefined}
                 className="h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37]"
                 disabled={status === "denied"}
               />
+            )}
+            {!selection.valid && (
+              <p id="report-period-error" role="alert" className="text-sm text-destructive">
+                {selection.error}
+              </p>
             )}
           </div>
         </div>

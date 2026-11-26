@@ -1,0 +1,13 @@
+ src/components/reports/ReportsDashboard.tsx | 72 [32m++++++++++++++[m[31m---------[m
+ src/lib/businessReportRequest.d.ts          | 24 [32m++++++++[m
+ src/lib/businessReportRequest.js            | 36 [32m++++++++++++[m
+ src/lib/businessReports.ts                  |  9 [32m++[m[31m-[m
+ src/lib/businessReportsService.ts           | 53 [32m+++++++[m[31m----------[m
+ src/lib/reportPeriods.d.ts                  | 15 [32m+++++[m
+ src/lib/reportPeriods.js                    | 87 [32m++++++++++++++++++++++++++++[m
+ src/pages/ReportsPage.tsx                   | 12 [32m+++[m[31m-[m
+ tests/browser/reports-visual.spec.mjs       | 90 [32m++++++++++++++++++++++++++[m[31m---[m
+ tests/business-report-request.test.mjs      | 63 [32m++++++++++++++++++++[m
+ tests/fixtures/reports-preview.tsx          | 26 [32m+++++++[m[31m--[m
+ tests/report-periods.test.mjs               | 43 [32m+++++++++++++[m[31m-[m
+ 12 files changed, 453 insertions(+), 77 deletions(-)

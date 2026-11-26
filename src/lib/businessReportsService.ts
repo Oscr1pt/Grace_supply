@@ -4,7 +4,7 @@ import {
   classifyBusinessReportError,
   parseBusinessReportResponse,
 } from "./businessReportsContract.js";
-import { resolveReportPeriod } from "./reportPeriods.js";
+import { buildBusinessReportRequest } from "./businessReportRequest.js";
 
 type RpcError = { code?: string; message?: string; status?: number };
 type ReportsRpcClient = {
@@ -15,49 +15,38 @@ type ReportsRpcClient = {
 };
 
 export class BusinessReportError extends Error {
-  kind: "denied" | "error";
+  kind: "denied" | "error" | "invalid-period";
 
-  constructor(kind: "denied" | "error") {
-    super(kind === "denied" ? "Report access denied" : "Report could not be loaded");
+  constructor(kind: "denied" | "error" | "invalid-period") {
+    super(
+      kind === "denied"
+        ? "Report access denied"
+        : kind === "invalid-period"
+          ? "Report period is invalid"
+          : "Report could not be loaded",
+    );
     this.name = "BusinessReportError";
     this.kind = kind;
   }
-}
-
-function rpcAnchor(periodType: ReportPeriodType, anchorDate: string) {
-  if (periodType === "month") return `${anchorDate.slice(0, 7)}-01`;
-  if (periodType === "year") return `${anchorDate.slice(0, 4)}-01-01`;
-  return anchorDate;
-}
-
-function expectedPeriod(periodType: ReportPeriodType, anchorDate: string) {
-  const anchor = rpcAnchor(periodType, anchorDate);
-  const range = resolveReportPeriod(periodType, anchor);
-  return {
-    type: periodType,
-    anchorDate:
-      periodType === "month"
-        ? anchor.slice(0, 7)
-        : periodType === "year"
-          ? anchor.slice(0, 4)
-          : anchor,
-    startDate: range.startDate,
-    endDateExclusive: range.endDateExclusive,
-  } as const;
 }
 
 export async function loadBusinessReport(
   periodType: ReportPeriodType,
   anchorDate: string,
 ): Promise<{ data: BusinessReportData; status: "ready" | "empty" }> {
-  const period = expectedPeriod(periodType, anchorDate);
   const client = supabase as unknown as ReportsRpcClient;
-  const { data, error } = await client.rpc("get_business_report", {
-    p_period_type: periodType,
-    p_anchor_date: rpcAnchor(periodType, anchorDate),
-  });
+  let request;
+  try {
+    request = buildBusinessReportRequest(periodType, anchorDate);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "INVALID_REPORT_PERIOD") {
+      throw new BusinessReportError("invalid-period");
+    }
+    throw error;
+  }
+  const { data, error } = await client.rpc("get_business_report", request.args);
   if (error) throw new BusinessReportError(classifyBusinessReportError(error));
 
-  const report = parseBusinessReportResponse(data, period);
+  const report = parseBusinessReportResponse(data, request.expectedPeriod);
   return { data: report, status: report.hasMovements ? "ready" : "empty" };
 }

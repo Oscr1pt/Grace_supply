@@ -6,11 +6,22 @@ import {
   type BusinessReportStatus,
   type ReportPeriodType,
 } from "../../src/components/reports/ReportsDashboard";
-import { resolveReportPeriod } from "../../src/lib/reportPeriods.js";
+import { resolveReportPeriod, validateReportPeriodSelection } from "../../src/lib/reportPeriods.js";
 import type { BusinessReportData } from "../../src/lib/businessReports";
 
 function localDate(date: Date) {
   return date.toISOString().slice(0, 10);
+}
+
+function currentBusinessDate() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Santo_Domingo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function createSyntheticReport(
@@ -107,11 +118,13 @@ function createSyntheticReport(
 
 export function Preview() {
   const [type, setType] = useState<ReportPeriodType>("week");
-  const [anchorDate, setAnchorDate] = useState("2026-11-18");
+  const [anchorDate, setAnchorDate] = useState(currentBusinessDate);
   const [status, setStatus] = useState<BusinessReportStatus>("ready");
+  const selection = validateReportPeriodSelection(type, anchorDate);
+  const visibleStatus = selection.valid ? status : "invalid-period";
   const data =
-    status === "ready" || status === "empty"
-      ? createSyntheticReport(type, anchorDate, status === "empty")
+    selection.valid && (status === "ready" || status === "empty")
+      ? createSyntheticReport(type, selection.anchorDate!, status === "empty")
       : undefined;
 
   return (
@@ -143,15 +156,16 @@ export function Preview() {
         </button>
       </div>
       <ReportsDashboard
-        status={status}
+        status={visibleStatus}
         data={data}
         businessName="Grace Supply"
         periodType={type}
         anchorDate={anchorDate}
         onPeriodTypeChange={(next) => {
           setType(next);
+          const today = currentBusinessDate();
           setAnchorDate(
-            next === "month" ? "2026-11-01" : next === "year" ? "2026-01-01" : "2026-11-18",
+            next === "month" ? today.slice(0, 7) : next === "year" ? today.slice(0, 4) : today,
           );
         }}
         onAnchorDateChange={setAnchorDate}

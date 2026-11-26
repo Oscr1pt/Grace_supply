@@ -35,6 +35,93 @@ function mondayFor(date) {
   return addUtcDays(date, -daysSinceMonday);
 }
 
+export function getCurrentBusinessYear(now = new Date()) {
+  return Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Santo_Domingo",
+      year: "numeric",
+    }).format(now),
+  );
+}
+
+export function validateReportPeriodSelection(
+  periodType,
+  value,
+  currentYear = getCurrentBusinessYear(),
+) {
+  if (typeof value !== "string") {
+    return {
+      valid: false,
+      anchorDate: null,
+      selectorValue: "",
+      error: "Selecciona un período válido.",
+    };
+  }
+
+  let anchorDate;
+  let selectorValue = value;
+
+  if (periodType === "year") {
+    if (!/^\d{4}$/.test(value)) {
+      return {
+        valid: false,
+        anchorDate: null,
+        selectorValue,
+        error: `Ingresa un año de cuatro dígitos entre 2000 y ${currentYear}.`,
+      };
+    }
+    const year = Number(value);
+    if (year < 2000 || year > currentYear) {
+      return {
+        valid: false,
+        anchorDate: null,
+        selectorValue,
+        error: `El año debe estar entre 2000 y ${currentYear}.`,
+      };
+    }
+    anchorDate = `${value}-01-01`;
+  } else if (periodType === "month") {
+    if (
+      !/^\d{4}-\d{2}$/.test(value) ||
+      Number(value.slice(5, 7)) < 1 ||
+      Number(value.slice(5, 7)) > 12
+    ) {
+      return {
+        valid: false,
+        anchorDate: null,
+        selectorValue,
+        error: "Selecciona un mes y un año válidos.",
+      };
+    }
+    anchorDate = `${value}-01`;
+  } else if (periodType === "week") {
+    anchorDate = value;
+  } else {
+    return {
+      valid: false,
+      anchorDate: null,
+      selectorValue,
+      error: "Selecciona un tipo de período válido.",
+    };
+  }
+
+  try {
+    resolveReportPeriod(periodType, anchorDate);
+  } catch {
+    return {
+      valid: false,
+      anchorDate: null,
+      selectorValue,
+      error:
+        periodType === "week"
+          ? "Selecciona una fecha válida para la semana."
+          : "Selecciona un período válido.",
+    };
+  }
+
+  return { valid: true, anchorDate, selectorValue, error: null };
+}
+
 export function resolveReportPeriod(periodType, anchorDate) {
   const anchor = parseCalendarDate(anchorDate);
   let start;

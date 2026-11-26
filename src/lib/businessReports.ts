@@ -38,4 +38,11 @@ export type BusinessReportData = {
 };
 
 export type BusinessReportStatus =
-  "integration-pending" | "loading" | "ready" | "empty" | "error" | "denied" | "stale";
+  | "integration-pending"
+  | "loading"
+  | "ready"
+  | "empty"
+  | "error"
+  | "denied"
+  | "stale"
+  | "invalid-period";

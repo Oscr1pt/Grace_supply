@@ -6,6 +6,7 @@ import type {
   ReportPeriodType,
 } from "@/lib/businessReports";
 import { BusinessReportError, loadBusinessReport } from "@/lib/businessReportsService";
+import { validateReportPeriodSelection } from "@/lib/reportPeriods.js";
 
 const BUSINESS_TIME_ZONE = "America/Santo_Domingo";
 
@@ -29,10 +30,19 @@ export function ReportsPage() {
 
   useEffect(() => {
     let currentRequest = true;
+    const selection = validateReportPeriodSelection(periodType, anchorDate);
+    if (!selection.valid) {
+      setStatus("invalid-period");
+      setData(undefined);
+      return () => {
+        currentRequest = false;
+      };
+    }
+
     setStatus("loading");
     setData(undefined);
 
-    void loadBusinessReport(periodType, anchorDate).then(
+    void loadBusinessReport(periodType, selection.selectorValue).then(
       (result) => {
         if (!currentRequest) return;
         setData(result.data);
