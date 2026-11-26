@@ -3,8 +3,10 @@ import { Button } from "@/components/ui/button";
 import { PageHeader, StatCard } from "@/components/PageHeader";
 import { useAuth } from "@/lib/auth";
 import { getDashboardReadState, calculateDashboardMetrics } from "@/lib/dashboardMetrics.js";
+import { calculateDashboardSalesMetrics, type DashboardRecentSale } from "@/lib/dashboardSales.js";
 import { fmtMoney, useSupabaseTable } from "@/lib/storage";
-import type { Client, Expense, InventoryItem, Sale } from "@/lib/types";
+import { useDashboardSales } from "@/lib/useDashboardSales";
+import type { Client, Expense, InventoryItem } from "@/lib/types";
 import { Package, Receipt, Users, Wallet, ShoppingBag, Building2 } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -21,7 +23,7 @@ function Dashboard() {
   const inventoryAllowed = can("inventory");
   const expensesAllowed = can("expenses");
 
-  const salesQuery = useSupabaseTable<Sale>("sales", "created_at", false, "*", salesAllowed);
+  const { now, monthlyQuery, recentQuery } = useDashboardSales(salesAllowed);
   const inventoryQuery = useSupabaseTable<DashboardInventoryItem>(
     "inventory",
     "created_at",
@@ -44,17 +46,20 @@ function Dashboard() {
     expensesAllowed,
   );
 
-  const metrics = calculateDashboardMetrics(
-    {
-      sales: salesQuery.data,
-      inventory: inventoryQuery.data,
-      clients: clientsQuery.data,
-      expenses: expensesQuery.data,
-    },
-    new Date(),
-  );
-  const salesState = getDashboardReadState(salesQuery, salesAllowed);
-  const activeSales = metrics.recentSales;
+  const metrics = {
+    ...calculateDashboardMetrics(
+      {
+        sales: [],
+        inventory: inventoryQuery.data,
+        clients: clientsQuery.data,
+        expenses: expensesQuery.data,
+      },
+      now,
+    ),
+    ...calculateDashboardSalesMetrics(monthlyQuery.data, now),
+  };
+  const salesState = getDashboardReadState(recentQuery, salesAllowed);
+  const activeSales = recentQuery.data;
 
   return (
     <div className="min-w-0">
@@ -69,7 +74,7 @@ function Dashboard() {
       >
         <MetricCard
           label="Ventas contabilizadas · mes"
-          query={salesQuery}
+          query={monthlyQuery}
           allowed={salesAllowed}
           icon={<Receipt aria-hidden="true" className="h-5 w-5" />}
           value={fmtMoney(metrics.monthSalesAmount)}
@@ -79,7 +84,7 @@ function Dashboard() {
         />
         <MetricCard
           label="Ventas al contado · mes"
-          query={salesQuery}
+          query={monthlyQuery}
           allowed={salesAllowed}
           icon={<Receipt aria-hidden="true" className="h-5 w-5" />}
           value={fmtMoney(metrics.monthCashSalesAmount)}
@@ -139,8 +144,8 @@ function Dashboard() {
             clients={clientsQuery.data}
             canReadClients={clientsAllowed}
             currency="DOP"
-            onRetry={() => void salesQuery.refresh()}
-            error={salesQuery.loadError}
+            onRetry={() => void recentQuery.refresh()}
+            error={recentQuery.loadError}
           />
         </section>
 
@@ -343,7 +348,7 @@ function RecentSales({
   error,
 }: {
   state: ReturnType<typeof getDashboardReadState>;
-  sales: Sale[];
+  sales: DashboardRecentSale[];
   clients: Client[];
   canReadClients: boolean;
   currency: string;
